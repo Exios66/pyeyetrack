@@ -58,8 +58,8 @@ class EyeTracking(ABC):
     blink detection and pupil-tracking.
 
     Attributes:
-        detector: OpenCV face detector
-        predictor: OpenCV facial landmark detector
+        face_cascade: OpenCV face detector
+        eye_cascade: OpenCV eye detector
 
     Methods:
         csv_writer(file_name)
@@ -71,22 +71,16 @@ class EyeTracking(ABC):
         start()
             method to start eye-tracking
     """
-    # Load OpenCV's pre-trained face detection model
+    # Load OpenCV's pre-trained face and eye detection models
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    
-    # Load OpenCV's facial landmark detector
-    face_mesh = cv2.FaceMesh(
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
+    eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
 
     def __init__(self, source):
         # acquire the webcam based on device id
         self.cap = cv2.VideoCapture(source)
-        self.frame = 0  # frame from the video or live-stream
-        self.landmarks = None  # variable to store facial landmarks
+        self.frame = None  # frame from the video or live-stream
+        self.eyes = None  # variable to store eye regions
+        self.face = None  # variable to store face region
         self.close_flag = False  # flag used to close the application
 
     @abstractmethod
@@ -131,25 +125,37 @@ class EyeTracking(ABC):
                 print("Can't receive frame (stream end?). Exiting ...")
                 break
 
-            # Convert to RGB for FaceMesh
-            rgb_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+            # Convert frame to grayscale
+            gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
             
-            # Get facial landmarks
-            results = self.face_mesh.process(rgb_frame)
+            # Detect faces
+            faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
             
-            if not results.multi_face_landmarks:
+            if len(faces) == 0:
                 print('Face not detected. Find better lighting.')
                 face_not_detected += 1
                 continue
 
             face_not_detected = 0
+            self.face = faces[0]  # Get the first face detected
             
-            # Store landmarks
-            self.landmarks = results.multi_face_landmarks[0]
+            # Get the face region
+            (x, y, w, h) = self.face
+            face_gray = gray[y:y+h, x:x+w]
             
-            # Convert frame to grayscale for pupil detection
-            gray_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+            # Detect eyes in the face region
+            self.eyes = self.eye_cascade.detectMultiScale(face_gray)
             
-            self.functionality(gray_frame)
+            if len(self.eyes) >= 2:  # We need at least two eyes
+                self.functionality(gray)
+            else:
+                print('Eyes not detected clearly. Please adjust lighting or position.')
+                continue
+
+            # Display the frame
+            cv2.imshow('Eye Tracking', self.frame)
+            if cv2.waitKey(1) == 27:  # Exit on ESC
+                break
 
         self.cap.release()
+        cv2.destroyAllWindows()

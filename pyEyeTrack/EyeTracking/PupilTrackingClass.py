@@ -264,27 +264,26 @@ class PupilTracking(EyeTracking):
         
         return {'left_eye': left_eye, 'right_eye': right_eye}
 
-    def detect_pupil(self, frame, eye_coordinates):
+    def detect_pupil(self, frame, eye_region):
         """
         Detect pupil center in eye region
         Args:
-            frame: Input frame
-            eye_coordinates: Dictionary containing eye region coordinates
+            frame: Input grayscale frame
+            eye_region: Tuple of (x, y, w, h) for eye region
         Returns:
-            Tuple of (x, y) coordinates of pupil center
+            Tuple of (x, y) coordinates of pupil center in frame coordinates
         """
-        x1, y1 = eye_coordinates['left'], eye_coordinates['top']
-        x2, y2 = eye_coordinates['right'], eye_coordinates['bottom']
+        (ex, ey, ew, eh) = eye_region
+        eye = frame[ey:ey+eh, ex:ex+ew]
         
-        eye_region = frame[y1:y2, x1:x2]
-        if eye_region.size == 0:
+        if eye.size == 0:
             return None
 
         # Enhance contrast
-        eye_region = cv2.equalizeHist(eye_region)
+        eye = cv2.equalizeHist(eye)
         
         # Threshold to isolate dark regions (pupil)
-        _, thresh = cv2.threshold(eye_region, 45, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(eye, 45, 255, cv2.THRESH_BINARY_INV)
         
         # Find contours
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -299,11 +298,15 @@ class PupilTracking(EyeTracking):
         if M["m00"] == 0:
             return None
             
-        # Calculate pupil center
-        cx = int(M["m10"] / M["m00"]) + x1
-        cy = int(M["m01"] / M["m00"]) + y1
+        # Calculate pupil center in eye region coordinates
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
         
-        return (cx, cy)
+        # Convert to frame coordinates
+        frame_x = ex + cx
+        frame_y = ey + cy
+        
+        return (frame_x, frame_y)
 
     def functionality(self, frame):
         """
@@ -311,21 +314,39 @@ class PupilTracking(EyeTracking):
         Args:
             frame: Input grayscale frame
         """
-        eye_coords = self.get_eye_coordinates(self.landmarks)
+        if len(self.eyes) < 2:
+            return
+            
+        # Sort eyes by x-coordinate to determine left and right
+        (fx, fy, fw, fh) = self.face
+        face_frame = frame[fy:fy+fh, fx:fx+fw]
+        
+        eyes = sorted(self.eyes, key=lambda e: e[0])  # Sort by x coordinate
+        left_eye, right_eye = eyes[:2]  # Get the leftmost and rightmost eyes
+        
+        # Adjust eye coordinates to frame coordinates
+        left_eye = (left_eye[0] + fx, left_eye[1] + fy, left_eye[2], left_eye[3])
+        right_eye = (right_eye[0] + fx, right_eye[1] + fy, right_eye[2], right_eye[3])
         
         # Detect pupils
-        left_pupil = self.detect_pupil(frame, eye_coords['left_eye'])
-        right_pupil = self.detect_pupil(frame, eye_coords['right_eye'])
+        left_pupil = self.detect_pupil(frame, left_eye)
+        right_pupil = self.detect_pupil(frame, right_eye)
         
         # Store data
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         self.data['Time'].append(current_time)
         
+        # Draw eye regions
+        cv2.rectangle(self.frame, (left_eye[0], left_eye[1]), 
+                     (left_eye[0] + left_eye[2], left_eye[1] + left_eye[3]), (0, 255, 0), 2)
+        cv2.rectangle(self.frame, (right_eye[0], right_eye[1]), 
+                     (right_eye[0] + right_eye[2], right_eye[1] + right_eye[3]), (0, 255, 0), 2)
+        
         if left_pupil:
             self.data['Left_Pupil_X'].append(left_pupil[0])
             self.data['Left_Pupil_Y'].append(left_pupil[1])
             # Draw pupil center
-            cv2.circle(self.frame, left_pupil, 2, (0, 255, 0), -1)
+            cv2.circle(self.frame, left_pupil, 2, (0, 0, 255), -1)
         else:
             self.data['Left_Pupil_X'].append(None)
             self.data['Left_Pupil_Y'].append(None)
@@ -334,7 +355,7 @@ class PupilTracking(EyeTracking):
             self.data['Right_Pupil_X'].append(right_pupil[0])
             self.data['Right_Pupil_Y'].append(right_pupil[1])
             # Draw pupil center
-            cv2.circle(self.frame, right_pupil, 2, (0, 255, 0), -1)
+            cv2.circle(self.frame, right_pupil, 2, (0, 0, 255), -1)
         else:
             self.data['Right_Pupil_X'].append(None)
             self.data['Right_Pupil_Y'].append(None)
