@@ -5,6 +5,26 @@ import subprocess
 import pkg_resources
 import time
 from datetime import datetime
+import ctypes
+
+def is_admin():
+    """Check if the script is running with admin privileges"""
+    try:
+        return os.getuid() == 0
+    except AttributeError:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+
+def check_camera_permissions():
+    """Check and request camera permissions on macOS"""
+    if sys.platform == 'darwin':
+        try:
+            import AVFoundation
+            auth_status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_('video')
+            if auth_status == AVFoundation.AVAuthorizationStatusNotDetermined:
+                AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_('video', None)
+        except ImportError:
+            # If we can't import AVFoundation, we'll rely on OpenCV's permission request
+            pass
 
 def check_dependencies():
     """Check and install required dependencies"""
@@ -95,13 +115,17 @@ def launch_application(session_id):
         print("\nStarting in 3 seconds...")
         time.sleep(3)
         
+        # Check camera permissions before starting
+        check_camera_permissions()
+        
         tracker = pyEyeTrack()
         tracker.pyEyeTrack_runner(
             pupilTracking=True,
             eyeTrackingLog=True,
             eyeTrackingFileName='participant',
             session_id=session_id,
-            audioRecorder=False  # Disable audio recording by default
+            audioRecorder=False,  # Disable audio recording by default
+            videoRecorder=False   # Disable video recording by default
         )
         
     except ImportError as e:
@@ -115,6 +139,12 @@ def launch_application(session_id):
 def main():
     """Main function to run the application"""
     print("=== PyEyeTrack Application ===")
+    
+    # Check if running with admin privileges
+    if not is_admin():
+        print("\nWarning: Application requires administrator privileges for keyboard monitoring.")
+        print("Please run the application with sudo or as administrator.")
+        sys.exit(1)
     
     # Check and install dependencies
     print("\nChecking dependencies...")
