@@ -31,14 +31,17 @@ class PupilTracking(EyeTracking):
 
     """
 
-    def __init__(self, source=0):
+    def __init__(self, source=0, session_id=None):
         """
-        Initialize PupilTracking with video source
+        Initialize PupilTracking with video source and session ID
         Args:
             source: Camera index or video file path (default is 0 for primary webcam)
+            session_id: Unique identifier for the tracking session (default is None)
         """
         super().__init__(source)
+        self.session_id = session_id if session_id else datetime.now().strftime("%Y%m%d_%H%M%S")
         self.data = {
+            'Session_ID': [],
             'Time': [],
             'Left_Pupil_X': [],
             'Left_Pupil_Y': [],
@@ -219,21 +222,26 @@ class PupilTracking(EyeTracking):
         if self.queue_handler.search_element('Stop'):
             self.close_flag = True
 
-    def csv_writer(self, file_name):
+    def csv_writer(self, file_name=None):
         """
-        Generates a .csv file with the timestamp and pupil centers with the 
-        given file name.
-
+        Generates a .csv file with the timestamp and pupil centers.
         Args:
-            file_name (string): name of the .csv file to be generated.
+            file_name (string): Optional base name for the .csv file. If not provided,
+                              will use session_id.
         """
         output_dir = "Output"
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
             
-        df = pd.DataFrame(self.eye_data_log)
-        df.to_csv(os.path.join(output_dir, file_name), index=False)
-        print(f"Data saved to {os.path.join(output_dir, file_name)}")
+        if file_name is None:
+            file_name = f"eye_tracking_{self.session_id}.csv"
+        else:
+            file_name = f"{file_name}_{self.session_id}.csv"
+            
+        file_path = os.path.join(output_dir, file_name)
+        df = pd.DataFrame(self.data)
+        df.to_csv(file_path, index=False)
+        print(f"Data saved to {file_path}")
 
     def get_eye_coordinates(self, landmarks):
         """
@@ -334,6 +342,7 @@ class PupilTracking(EyeTracking):
         
         # Store data
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        self.data['Session_ID'].append(self.session_id)
         self.data['Time'].append(current_time)
         
         # Draw eye regions
@@ -359,6 +368,10 @@ class PupilTracking(EyeTracking):
         else:
             self.data['Right_Pupil_X'].append(None)
             self.data['Right_Pupil_Y'].append(None)
+            
+        # Display session ID on frame
+        cv2.putText(self.frame, f"Session: {self.session_id}", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             
         # Display the frame
         cv2.imshow('Eye Tracking', self.frame)

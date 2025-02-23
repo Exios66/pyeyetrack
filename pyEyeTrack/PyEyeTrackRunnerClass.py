@@ -35,7 +35,8 @@ class pyEyeTrack():
             videoName='video',
             audioRecorder=False,
             audioName='audio',
-            destinationPath='/Output'):
+            destinationPath='/Output',
+            session_id=None):
         """
         This function enables the user to run the functionalities of the 
         library simultaneously.
@@ -81,8 +82,10 @@ class pyEyeTrack():
             Default: 'audio'.
 
             destinationPath (str, optional): The parameter enables the user to specify 
-            the location of the output files. Default: ‘/Output’.
+            the location of the output files. Default: '/Output'.
 
+            session_id (str, optional): Unique identifier for the tracking session.
+            If not provided, a timestamp-based ID will be generated. Default: None.
         """
 
         startEyeTracking = False
@@ -129,7 +132,7 @@ class pyEyeTrack():
             eyeTrackingThread = threading.Thread(target=eyeTracking.start)
 
         if pupilTracking and blinkDetection == False:
-            eyeTracking = PupilTracking(video_source)
+            eyeTracking = PupilTracking(video_source, session_id)
             eyeTrackingThread = threading.Thread(target=eyeTracking.start)
 
         if videoRecorder:
