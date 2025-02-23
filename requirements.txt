@@ -1,7 +1,8 @@
-dlib==19.4
-keyboard==0.13.3=pypi_0
-numpy==1.18.1=pypi_0
-opencv==3.3.1
-pandas==0.24.0
-pyaudio==0.2.11
-pyqt==5.6.0
+dlib>=19.24.0
+keyboard>=0.13.5
+numpy>=1.24.0
+opencv-python>=4.8.0
+pandas>=2.0.0
+pyaudio>=0.2.13
+PyQt5>=5.15.0
+tqdm>=4.65.0
