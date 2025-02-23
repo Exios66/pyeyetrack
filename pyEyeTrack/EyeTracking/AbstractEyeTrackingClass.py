@@ -1,7 +1,8 @@
 import cv2
 import keyboard
 from abc import ABC, abstractmethod
-import dlib
+import numpy as np
+import os
 
 import sys
 import os
@@ -50,7 +51,6 @@ def check():
 check()
 
 class EyeTracking(ABC):
-
     """
     EyeTracking is an abstract class that is used to implement
     different types of eye-tracking events.
@@ -58,9 +58,8 @@ class EyeTracking(ABC):
     blink detection and pupil-tracking.
 
     Attributes:
-        detector: default face detector in dlib
-        predictor: used to map the facial landmark on the
-        detected face
+        detector: OpenCV face detector
+        predictor: OpenCV facial landmark detector
 
     Methods:
         csv_writer(file_name)
@@ -72,22 +71,28 @@ class EyeTracking(ABC):
         start()
             method to start eye-tracking
     """
-    file_path = os.path.abspath(SHAPE_PREDICTOR_FNAME)
-    detector = dlib.get_frontal_face_detector()
-    predictor = dlib.shape_predictor(file_path)
+    # Load OpenCV's pre-trained face detection model
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    
+    # Load OpenCV's facial landmark detector
+    face_mesh = cv2.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
 
     def __init__(self, source):
-
         # acquire the webcam based on device id
         self.cap = cv2.VideoCapture(source)
         self.frame = 0  # frame from the video or live-stream
-        self.landmarks = "xx"  # variable to store facial landmarks
+        self.landmarks = None  # variable to store facial landmarks
         self.close_flag = False  # flag used to close the application
 
     @abstractmethod
     def csv_writer(self, file_name):
         """
-        Implements writer to write the data dictonary to .csv file.
+        Implements writer to write the data dictionary to .csv file.
 
         Args:
             file_name (string): name of the .csv file to be generated.
@@ -107,42 +112,44 @@ class EyeTracking(ABC):
     def start(self):
         """
         This function reads the input from the video or the live-stream.
-        It also processes the frame acquired and detects the facein the frame.
+        It also processes the frame acquired and detects the face in the frame.
         Then all the facial landmarks are mapped to face detected in the frame.
-        The frame and the facial landmarks are thenused by the subclassed to
+        The frame and the facial landmarks are then used by the subclassed to
         implement blink detection or pupil tracking.
         The application terminates if the 'esc' key is pressed or if the
         close_flag is set to 'True'. If the face is not detected for 10 cycles
         of the loop the application will terminate.
-
         """
         face_not_detected = 0
         while True:
-
-            if keyboard.is_pressed(
-                    'esc') or self.close_flag or face_not_detected >= 10:
+            if keyboard.is_pressed('esc') or self.close_flag or face_not_detected >= 10:
                 break
-                
-                
+
             ret, self.frame = self.cap.read()
 
             if not ret:
                 print("Can't receive frame (stream end?). Exiting ...")
                 break
 
-            self.frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-
-            faces, _, _ = self.detector.run(self.frame, 0, 0)
-
-            if len(faces) == 0:
+            # Convert to RGB for FaceMesh
+            rgb_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+            
+            # Get facial landmarks
+            results = self.face_mesh.process(rgb_frame)
+            
+            if not results.multi_face_landmarks:
                 print('Face not detected. Find better lighting.')
                 face_not_detected += 1
                 continue
 
             face_not_detected = 0
-
-            self.landmarks = self.predictor(self.frame, faces[0])
-
-            self.functionality(self.frame)
+            
+            # Store landmarks
+            self.landmarks = results.multi_face_landmarks[0]
+            
+            # Convert frame to grayscale for pupil detection
+            gray_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+            
+            self.functionality(gray_frame)
 
         self.cap.release()
