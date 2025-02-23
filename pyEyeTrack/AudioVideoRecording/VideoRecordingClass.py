@@ -1,11 +1,7 @@
 import cv2
-import pyaudio
-import wave
 import threading
 import time
-import subprocess
 import os
-import sys
 
 
 class VideoRecorder():

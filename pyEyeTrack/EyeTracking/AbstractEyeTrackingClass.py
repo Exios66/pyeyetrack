@@ -3,9 +3,6 @@ import keyboard
 from abc import ABC, abstractmethod
 import numpy as np
 import os
-
-import sys
-import os
 import bz2
 from functools import partial
 from tqdm import tqdm

@@ -2,12 +2,18 @@ from pyEyeTrack.EyeTracking.PupilTrackingClass import PupilTracking
 from pyEyeTrack.EyeTracking.BlinkingClass import Blinking
 from pyEyeTrack.EyeTracking.PupilBlinkingClass import PupilBlinking
 from pyEyeTrack.AudioVideoRecording.VideoRecordingClass import VideoRecorder
-from pyEyeTrack.AudioVideoRecording.AudioRecordingClass import AudioRecorder
 import threading
 import importlib
 import sys
 import os
 
+# Try to import AudioRecorder, but don't fail if PyAudio is not available
+try:
+    from pyEyeTrack.AudioVideoRecording.AudioRecordingClass import AudioRecorder
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+    print("Warning: PyAudio not available. Audio recording will be disabled.")
 
 class pyEyeTrack():
     """PyEyeTrack is a pupil tracking library, built on top of the 
@@ -88,6 +94,10 @@ class pyEyeTrack():
             If not provided, a timestamp-based ID will be generated. Default: None.
         """
 
+        if audioRecorder and not AUDIO_AVAILABLE:
+            print("Warning: Audio recording requested but PyAudio is not available. Audio recording will be skipped.")
+            audioRecorder = False
+
         startEyeTracking = False
         outputPath = destinationPath
 
@@ -141,9 +151,13 @@ class pyEyeTrack():
             videoRecorderThread = threading.Thread(target=videoRecorder.main)
 
         if audioRecorder:
-            audioOutputPath = outputPath + audioName
-            audioRecorder = AudioRecorder(outputPath + audioName)
-            audioRecorderThread = threading.Thread(target=audioRecorder.main)
+            try:
+                audioOutputPath = outputPath + audioName
+                audioRecorder = AudioRecorder(outputPath + audioName)
+                audioRecorderThread = threading.Thread(target=audioRecorder.main)
+            except Exception as e:
+                print(f"Warning: Failed to initialize audio recording: {str(e)}")
+                audioRecorder = False
 
         if UI:
             module = self.dynamic_import(UI_file_name)
