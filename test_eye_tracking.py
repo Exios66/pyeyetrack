@@ -218,12 +218,34 @@ class TestPyEyeTrack(unittest.TestCase):
 
     def test_data_storage(self):
         """Test data storage and retrieval"""
-        # Add test data
+        # Create test directory first
+        self.tracker.data_dir = os.path.join(self.test_data_dir, "data")
+        os.makedirs(self.tracker.data_dir, exist_ok=True)
+        
+        # Add test data - ensure all arrays get the same number of elements
         timestamp = datetime.now()
-        self.tracker.eye_data['timestamp'].append(timestamp)
-        self.tracker.eye_data['frame_number'].append(1)
-        self.tracker.eye_data['left_eye_x'].append(100)
-        self.tracker.eye_data['left_eye_y'].append(200)
+        test_data = {
+            'timestamp': [timestamp],
+            'frame_number': [1],
+            'left_eye_x': [100],
+            'left_eye_y': [200],
+            'right_eye_x': [300],
+            'right_eye_y': [400],
+            'left_pupil_size': [5.0],
+            'right_pupil_size': [5.0],
+            'left_blink': [0],
+            'right_blink': [0],
+            'gaze_x': [500],
+            'gaze_y': [600],
+            'head_pose_x': [10],
+            'head_pose_y': [20],
+            'head_pose_z': [30],
+            'marker': [None],
+            'data_quality': [1.0]
+        }
+        
+        # Update tracker's eye_data with test data
+        self.tracker.eye_data = test_data
         
         # Save data
         self.tracker.save_eye_data()
@@ -232,20 +254,38 @@ class TestPyEyeTrack(unittest.TestCase):
         self.assertTrue(os.path.exists(self.tracker.data_dir))
         csv_files = [f for f in os.listdir(self.tracker.data_dir) if f.endswith('.csv')]
         self.assertGreater(len(csv_files), 0)
+        
+        # Verify data content
+        csv_path = os.path.join(self.tracker.data_dir, csv_files[0])
+        df = pd.read_csv(csv_path)
+        self.assertEqual(len(df), 1)  # Should have one row
+        self.assertEqual(df['left_eye_x'].iloc[0], 100)
+        self.assertEqual(df['left_eye_y'].iloc[0], 200)
 
     def test_error_handling(self):
         """Test error handling and recovery"""
         # Test invalid camera
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             self.tracker.switch_camera(-1)
         
-        # Test invalid data
-        with self.assertRaises(Exception):
+        # Test invalid data validation
+        with self.assertRaises(TypeError):
             self.tracker.validate_eye_data(None)
+        
+        # Test invalid data directory
+        self.tracker.data_dir = None
+        with self.assertRaises(Exception):
+            self.tracker.save_eye_data()
         
         # Test cleanup after error
         self.tracker.cleanup()
         self.assertFalse(self.tracker.running)
+        
+        # Test invalid frame processing
+        with self.assertRaises(Exception):
+            self.tracker.update_performance_metrics()
+            self.tracker.frame_times = None
+            self.tracker.update_performance_metrics()
 
     def test_calibration(self):
         """Test calibration functionality"""
@@ -277,14 +317,15 @@ class TestPyEyeTrack(unittest.TestCase):
 
     def test_performance_stats(self):
         """Test performance statistics calculation and storage"""
+        # Create test directory first
+        self.tracker.data_dir = os.path.join(self.test_data_dir, "data")
+        os.makedirs(self.tracker.data_dir, exist_ok=True)
+        
         # Simulate some performance data
         self.tracker.frame_times = [0.033] * 30  # Simulate 30fps
         self.tracker.processing_times = [0.016] * 30
         self.tracker.dropped_frames = 5
         self.tracker.total_frames = 100
-        
-        # Create data directory
-        os.makedirs(self.tracker.data_dir, exist_ok=True)
         
         # Save performance stats
         self.tracker.cleanup()
@@ -299,6 +340,12 @@ class TestPyEyeTrack(unittest.TestCase):
             self.assertIn('dropped_frames', stats)
             self.assertIn('total_frames', stats)
             self.assertIn('average_processing_time', stats)
+            
+            # Verify the stats values
+            self.assertAlmostEqual(stats['average_fps'], 30.0, places=1)
+            self.assertEqual(stats['dropped_frames'], 5)
+            self.assertEqual(stats['total_frames'], 100)
+            self.assertAlmostEqual(stats['average_processing_time'], 0.016, places=3)
 
 def main():
     """Run the test suite"""

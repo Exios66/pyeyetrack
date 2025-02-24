@@ -120,19 +120,31 @@ class PyEyeTrackRunner:
     def validate_eye_data(self, eye_data: Dict[str, Any]) -> float:
         """
         Validate eye tracking data quality
-        Returns quality score between 0 and 1
+        Args:
+            eye_data: Dictionary containing eye tracking data
+        Returns:
+            float: Quality score between 0 and 1
+        Raises:
+            TypeError: If eye_data is None
+            ValueError: If required fields are missing
         """
+        if eye_data is None:
+            raise TypeError("Eye data cannot be None")
+            
+        if not isinstance(eye_data, dict):
+            raise TypeError("Eye data must be a dictionary")
+            
         quality_score = 1.0
         deductions = []
         
         # Check pupil size
-        if eye_data['left_pupil_size'] > 0:  # Only check if data exists
+        if eye_data.get('left_pupil_size', 0) > 0:  # Only check if data exists
             if not (self.validation_ranges['pupil_size'][0] <= eye_data['left_pupil_size'] <= self.validation_ranges['pupil_size'][1]):
                 quality_score -= 0.2
                 deductions.append('pupil_size_out_of_range')
         
         # Check gaze coordinates
-        if eye_data['gaze_x'] > 0 and eye_data['gaze_y'] > 0:
+        if eye_data.get('gaze_x', 0) > 0 and eye_data.get('gaze_y', 0) > 0:
             if not (0 <= eye_data['gaze_x'] <= self.validation_ranges['gaze_x'][1]):
                 quality_score -= 0.2
                 deductions.append('gaze_x_out_of_range')
@@ -142,7 +154,7 @@ class PyEyeTrackRunner:
         
         # Check head pose
         for pose in ['head_pose_x', 'head_pose_y', 'head_pose_z']:
-            if eye_data[pose] != 0:  # Only check if data exists
+            if eye_data.get(pose, 0) != 0:  # Only check if data exists
                 if not (self.validation_ranges['head_pose'][0] <= eye_data[pose] <= self.validation_ranges['head_pose'][1]):
                     quality_score -= 0.1
                     deductions.append(f'{pose}_out_of_range')
@@ -184,60 +196,72 @@ class PyEyeTrackRunner:
         self.notes.append(note)
         print(f"Note added: {note_text}")
 
-    def save_eye_data(self):
-        """Save eye tracking data to CSV file with enhanced organization."""
+    def save_eye_data(self) -> None:
+        """
+        Save eye tracking data to CSV file with enhanced organization.
+        Raises:
+            Exception: If data directory is not set or if there's an error saving data
+        """
+        if self.data_dir is None:
+            raise Exception("Data directory not set")
+            
         if len(self.eye_data['timestamp']) > 0:
-            # Create DataFrame with all collected metrics
-            df = pd.DataFrame(self.eye_data)
-            
-            # Add recording statistics
-            stats = {
-                'total_frames': self.total_frames,
-                'dropped_frames': self.dropped_frames,
-                'frame_rate': self.total_frames / (time.time() - self.start_time) if self.start_time else 0,
-                'recording_duration': time.time() - self.start_time if self.start_time else 0,
-                'camera_id': self.current_camera
-            }
-            
-            # Save raw data
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            csv_filename = f"eye_tracking_data_{timestamp}.csv"
-            csv_path = os.path.join(self.data_dir, csv_filename)
-            df.to_csv(csv_path, index=False)
-            
-            # Save markers
-            if self.markers:
-                markers_file = os.path.join(self.data_dir, f"markers_{timestamp}.json")
-                with open(markers_file, 'w') as f:
-                    json.dump(self.markers, f, indent=4)
-            
-            # Save notes
-            if self.notes:
-                notes_file = os.path.join(self.data_dir, f"notes_{timestamp}.json")
-                with open(notes_file, 'w') as f:
-                    json.dump(self.notes, f, indent=4)
-            
-            # Save statistics
-            stats_file = os.path.join(self.data_dir, f"recording_stats_{timestamp}.json")
-            with open(stats_file, 'w') as f:
-                json.dump(stats, f, indent=4)
-            
-            print(f"\nRecording Summary:")
-            print(f"Total Frames: {stats['total_frames']}")
-            print(f"Dropped Frames: {stats['dropped_frames']} ({(stats['dropped_frames']/stats['total_frames']*100):.2f}%)")
-            print(f"Average Frame Rate: {stats['frame_rate']:.2f} fps")
-            print(f"Recording Duration: {stats['recording_duration']:.2f} seconds")
-            print(f"Data saved to {csv_path}")
-            
-            # Clear the data for next recording
-            for key in self.eye_data:
-                self.eye_data[key] = []
-            self.frame_count = 0
-            self.total_frames = 0
-            self.dropped_frames = 0
-            self.start_time = None
-            self.markers = []
-            self.notes = []
+            try:
+                # Create DataFrame with all collected metrics
+                df = pd.DataFrame(self.eye_data)
+                
+                # Add recording statistics
+                stats = {
+                    'total_frames': self.total_frames,
+                    'dropped_frames': self.dropped_frames,
+                    'frame_rate': self.total_frames / (time.time() - self.start_time) if self.start_time else 0,
+                    'recording_duration': time.time() - self.start_time if self.start_time else 0,
+                    'camera_id': self.current_camera
+                }
+                
+                # Save raw data
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                csv_filename = f"eye_tracking_data_{timestamp}.csv"
+                csv_path = os.path.join(self.data_dir, csv_filename)
+                df.to_csv(csv_path, index=False)
+                
+                # Save markers
+                if self.markers:
+                    markers_file = os.path.join(self.data_dir, f"markers_{timestamp}.json")
+                    with open(markers_file, 'w') as f:
+                        json.dump(self.markers, f, indent=4)
+                
+                # Save notes
+                if self.notes:
+                    notes_file = os.path.join(self.data_dir, f"notes_{timestamp}.json")
+                    with open(notes_file, 'w') as f:
+                        json.dump(self.notes, f, indent=4)
+                
+                # Save statistics
+                stats_file = os.path.join(self.data_dir, f"recording_stats_{timestamp}.json")
+                with open(stats_file, 'w') as f:
+                    json.dump(stats, f, indent=4)
+                
+                logger.info(f"\nRecording Summary:")
+                logger.info(f"Total Frames: {stats['total_frames']}")
+                logger.info(f"Dropped Frames: {stats['dropped_frames']} ({(stats['dropped_frames']/stats['total_frames']*100):.2f}%)")
+                logger.info(f"Average Frame Rate: {stats['frame_rate']:.2f} fps")
+                logger.info(f"Recording Duration: {stats['recording_duration']:.2f} seconds")
+                logger.info(f"Data saved to {csv_path}")
+                
+                # Clear the data for next recording
+                for key in self.eye_data:
+                    self.eye_data[key] = []
+                self.frame_count = 0
+                self.total_frames = 0
+                self.dropped_frames = 0
+                self.start_time = None
+                self.markers = []
+                self.notes = []
+                
+            except Exception as e:
+                logger.error(f"Error saving eye tracking data: {str(e)}")
+                raise
 
     def process_key(self, key):
         """Process a key press event."""
@@ -297,14 +321,25 @@ class PyEyeTrackRunner:
             self.running = False
             logger.info("PyEyeTrack cleanup completed")
 
-    def switch_camera(self, camera_id):
-        """Switch to a different camera"""
+    def switch_camera(self, camera_id: int) -> bool:
+        """
+        Switch to a different camera
+        Args:
+            camera_id: ID of the camera to switch to
+        Returns:
+            bool: True if switch successful, False otherwise
+        Raises:
+            ValueError: If camera_id is invalid
+        """
+        if camera_id < 0:
+            raise ValueError(f"Invalid camera ID: {camera_id}")
+            
         if self.cap is not None:
             self.cap.release()
         
         self.cap = cv2.VideoCapture(camera_id)
         if not self.cap.isOpened():
-            print(f"Error: Could not open camera {camera_id}")
+            logger.error(f"Could not open camera {camera_id}")
             if self.current_camera is not None:
                 self.cap = cv2.VideoCapture(self.current_camera)
             return False
