@@ -47,6 +47,12 @@ class PyEyeTrackRunner:
     ):
         """
         Main function to run eye tracking and recording.
+        Args:
+            source (int/str): Camera index or video file path (default: 0)
+            pupilTracking (bool): Enable pupil tracking (default: True)
+            videoRecording (bool): Enable video recording (default: True)
+            audioRecording (bool): Enable audio recording (default: False)
+            destinationPath (str): Output directory path (default: "./Output")
         """
         # Create output directory if it doesn't exist
         os.makedirs(destinationPath, exist_ok=True)

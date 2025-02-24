@@ -15,6 +15,10 @@ class VideoRecorder():
         stop()
             The function stops recording video. 
             All the openCV objects are released.
+        write_frame(frame)
+            Write a single frame to the video file.
+        close()
+            Close the video recorder and release resources.
 
     """
 
@@ -46,6 +50,21 @@ class VideoRecorder():
         except Exception as e:
             print(f"Error initializing video capture: {str(e)}")
             raise
+
+    def write_frame(self, frame):
+        """Write a single frame to the video file."""
+        if self.open and frame is not None:
+            try:
+                # Resize frame if needed
+                if frame.shape[:2] != self.frameSize[::-1]:
+                    frame = cv2.resize(frame, self.frameSize)
+                self.video_out.write(frame)
+            except Exception as e:
+                print(f"Error writing frame: {str(e)}")
+
+    def close(self):
+        """Close the video recorder and release resources."""
+        self.stop()
 
     def record(self):
         """

@@ -31,21 +31,27 @@ def _bz2_decompress_inplace(path, out_path):
     with open(path, 'rb') as source, open(out_path, 'wb') as dest:
         dest.write(bz2.decompress(source.read()))
 
-def check():
-    print("shape_predictor_68_face_landmarks.dat file is needed.")
-    print("Press n -if you already have it and place it in the current folder")
-    print("Press y -file will start downloading.")
-
-    download_input = input()
-    if download_input == 'y':
-        script_path = os.path.dirname(os.path.abspath(__file__))
-
+def check_and_download_model():
+    """Check if the shape predictor model file exists and download if needed."""
+    if os.path.exists(SHAPE_PREDICTOR_FNAME):
+        return True
+        
+    print(f"Downloading {SHAPE_PREDICTOR_FNAME}...")
+    try:
         _download_file(SHAPE_PREDICTOR_URL, SHAPE_PREDICTOR_BZ2_FNAME)
-        _bz2_decompress_inplace(SHAPE_PREDICTOR_BZ2_FNAME,
-                                    SHAPE_PREDICTOR_FNAME)
+        _bz2_decompress_inplace(SHAPE_PREDICTOR_BZ2_FNAME, SHAPE_PREDICTOR_FNAME)
+        
+        # Clean up the bz2 file
+        if os.path.exists(SHAPE_PREDICTOR_BZ2_FNAME):
+            os.remove(SHAPE_PREDICTOR_BZ2_FNAME)
+            
+        return True
+    except Exception as e:
+        print(f"Error downloading model file: {str(e)}")
+        return False
 
-
-check()
+# Download model file if needed
+check_and_download_model()
 
 class EyeTracking(ABC):
     """
