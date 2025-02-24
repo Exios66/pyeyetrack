@@ -2,179 +2,227 @@
 import os
 import sys
 import subprocess
-import pkg_resources
+from importlib.metadata import version, PackageNotFoundError
 import time
 from datetime import datetime
-import ctypes
+import json
+import cv2
+from admin_gui import launch_admin_gui
 
-def is_admin():
-    """Check if the script is running with admin privileges"""
-    try:
-        return os.getuid() == 0
-    except AttributeError:
-        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+def get_default_camera():
+    """Get the default camera device"""
+    # Try to find an external webcam first
+    for i in range(10):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            # Get camera info
+            if sys.platform == "darwin":  # macOS
+                # On macOS, external cameras typically have higher indices
+                if i > 0:
+                    return i
+            else:  # Windows/Linux
+                # Try to get camera name
+                name = cap.getBackendName()
+                if "USB" in name.upper():
+                    return i
+            cap.release()
+    
+    # If no external webcam found, use the first available camera
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        cap.release()
+        return 0
+    
+    raise Exception("No camera devices found")
 
 def check_camera_permissions():
     """Check and request camera permissions on macOS"""
     if sys.platform == 'darwin':
         try:
             import AVFoundation
-            auth_status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_('video')
+            auth_status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_('AVMediaTypeVideo')
             if auth_status == AVFoundation.AVAuthorizationStatusNotDetermined:
-                AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_('video', None)
+                AVFoundation.AVCaptureDevice.requestAccessForMediaType_('AVMediaTypeVideo', None)
         except ImportError:
             # If we can't import AVFoundation, we'll rely on OpenCV's permission request
             pass
+        except Exception as e:
+            print(f"Note: Could not check camera permissions: {e}")
+            print("You may need to grant camera permissions manually in System Settings.")
 
 def check_dependencies():
     """Check and install required dependencies"""
-    required = {
-        'numpy': 'numpy>=1.19.5',
-        'pandas': 'pandas>=1.2.4',
-        'opencv-python': 'opencv-python>=4.7.0',
-        'keyboard': 'keyboard>=0.13.5',
-        'tqdm': 'tqdm>=4.65.0',
-        'setuptools': 'setuptools>=75.0.0'
-    }
-    
-    missing = []
-    
-    for package, version in required.items():
+    try:
+        # Check PyEyeTrack version
         try:
-            pkg_resources.require(version)
-        except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict):
-            missing.append(version)
-    
-    if missing:
-        print("Installing missing dependencies...")
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + missing)
-            print("Dependencies installed successfully!")
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing dependencies: {str(e)}")
-            print("Please try installing them manually using:")
-            print(f"pip install {' '.join(missing)}")
-            return False
-    return True
+            pyeyetrack_version = version('PyEyeTrack')
+            print(f"PyEyeTrack version: {pyeyetrack_version}")
+        except PackageNotFoundError:
+            print("PyEyeTrack not found. Please install it first.")
+            sys.exit(1)
+            
+        # Check other dependencies
+        required = {
+            'opencv-python': '4.7.0',
+            'numpy': '1.19.5',
+            'pandas': '1.2.4',
+            'PyQt5': '5.6.0'
+        }
+        
+        for package, min_version in required.items():
+            try:
+                pkg_version = version(package)
+                print(f"{package} version: {pkg_version}")
+            except PackageNotFoundError:
+                print(f"{package} not found. Installing...")
+                subprocess.check_call([sys.executable, "-m", "pip", "install", f"{package}>={min_version}"])
+                
+    except Exception as e:
+        print(f"Error checking dependencies: {e}")
+        sys.exit(1)
 
 def check_model_file():
-    """Check if the shape predictor model file exists and download if needed"""
+    """Check if the shape predictor model file exists"""
     model_file = 'shape_predictor_68_face_landmarks.dat'
     if not os.path.exists(model_file):
-        print(f"{model_file} not found. Downloading automatically...")
-        try:
-            from pyEyeTrack.EyeTracking.AbstractEyeTrackingClass import check
-            check()
-            if not os.path.exists(model_file):
-                print("Error: Model file download failed.")
-                return False
-        except Exception as e:
-            print(f"Error downloading model file: {str(e)}")
-            return False
+        print(f"Warning: {model_file} not found.")
+        print("Please ensure the model file is in the correct location.")
+        return False
     return True
 
-def setup_output_directory():
-    """Create Output directory if it doesn't exist"""
-    output_dir = "Output"
-    try:
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            print(f"Created output directory: {output_dir}")
-        return True
-    except Exception as e:
-        print(f"Error creating output directory: {str(e)}")
-        return False
+def get_session_metadata():
+    """Collect detailed session metadata"""
+    metadata = {
+        'participant': {
+            'id': input("Please enter participant ID: ").strip(),
+            'age': input("Participant age (optional, press Enter to skip): ").strip() or None,
+            'gender': input("Participant gender (optional, press Enter to skip): ").strip() or None,
+            'vision_correction': input("Vision correction? (glasses/contacts/none): ").strip().lower() or 'none'
+        },
+        'session': {
+            'id': datetime.now().strftime('%Y%m%d_%H%M%S'),
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'time': datetime.now().strftime('%H:%M:%S'),
+            'lighting_condition': input("Lighting condition (bright/dim/dark): ").strip().lower() or 'bright',
+            'distance_from_screen': input("Approximate distance from screen in cm: ").strip() or '60',
+            'screen_resolution': input("Screen resolution (e.g., 1920x1080): ").strip() or '1920x1080'
+        },
+        'experiment': {
+            'task_type': input("Task type (free-viewing/reading/tracking): ").strip().lower() or 'free-viewing',
+            'duration': input("Planned duration in minutes: ").strip() or '5',
+            'notes': input("Additional notes (optional): ").strip() or None
+        }
+    }
+    return metadata
 
-def get_session_info():
-    """Get session information from user"""
-    print("\n=== Eye Tracking Session Setup ===")
-    print("Please enter the following information:")
+def validate_metadata(metadata):
+    """Validate required metadata fields"""
+    if not metadata['participant']['id']:
+        raise ValueError("Participant ID cannot be empty")
     
-    while True:
-        participant_id = input("Participant ID: ").strip()
-        if participant_id and participant_id.isalnum():
-            break
-        print("Participant ID must be non-empty and contain only letters and numbers.")
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    session_id = f"{participant_id}_{timestamp}"
-    
-    return session_id
-
-def launch_application(session_id):
-    """Launch the eye tracking application"""
+    # Convert numeric fields
     try:
-        from pyEyeTrack.PyEyeTrackRunnerClass import pyEyeTrack
-        
-        print("\nInitializing eye tracking session...")
-        print(f"Session ID: {session_id}")
-        print("\nInstructions:")
-        print("1. Position yourself in front of the camera")
-        print("2. Ensure good lighting conditions")
-        print("3. Press 'ESC' to stop tracking")
-        print("\nStarting in 3 seconds...")
-        time.sleep(3)
-        
-        # Check camera permissions before starting
-        check_camera_permissions()
-        
-        tracker = pyEyeTrack()
-        tracker.pyEyeTrack_runner(
-            pupilTracking=True,
-            eyeTrackingLog=True,
-            eyeTrackingFileName='participant',
-            session_id=session_id,
-            audioRecorder=False,  # Disable audio recording by default
-            videoRecorder=False   # Disable video recording by default
-        )
-        
-    except ImportError as e:
-        print(f"\nError importing PyEyeTrack: {str(e)}")
-        print("Please ensure the package is installed correctly.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\nError launching application: {str(e)}")
-        sys.exit(1)
+        if metadata['participant']['age']:
+            metadata['participant']['age'] = int(metadata['participant']['age'])
+        metadata['session']['distance_from_screen'] = float(metadata['session']['distance_from_screen'])
+        metadata['experiment']['duration'] = float(metadata['experiment']['duration'])
+    except ValueError as e:
+        raise ValueError(f"Invalid numeric value in metadata: {str(e)}")
+
+def setup_session_directory(metadata):
+    """Create and setup session directory structure"""
+    base_dir = "Output"
+    session_dir = os.path.join(
+        base_dir,
+        f"participant_{metadata['participant']['id']}",
+        f"session_{metadata['session']['id']}"
+    )
+    
+    # Create directory structure
+    subdirs = ['data', 'metadata', 'analysis']
+    for subdir in subdirs:
+        os.makedirs(os.path.join(session_dir, subdir), exist_ok=True)
+    
+    # Save metadata
+    metadata_file = os.path.join(session_dir, 'metadata', 'session_metadata.json')
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=4)
+    
+    return session_dir
 
 def main():
-    """Main function to run the application"""
-    print("=== PyEyeTrack Application ===")
+    """Main function to run the eye tracking application"""
+    print("\n=== PyEyeTrack Application ===\n")
     
-    # Check if running with admin privileges
-    if not is_admin():
-        print("\nWarning: Application requires administrator privileges for keyboard monitoring.")
-        print("Please run the application with sudo or as administrator.")
-        sys.exit(1)
-    
-    # Check and install dependencies
-    print("\nChecking dependencies...")
-    if not check_dependencies():
-        sys.exit(1)
-    
-    # Setup output directory
-    if not setup_output_directory():
-        sys.exit(1)
-    
-    # Check for model file
-    if not check_model_file():
-        sys.exit(1)
-    
-    # Get session information
     try:
-        session_id = get_session_info()
+        # Check dependencies and permissions
+        check_dependencies()
+        check_camera_permissions()
+        
+        if not check_model_file():
+            print("Warning: Proceeding without model file. Eye tracking may not work correctly.")
+        
+        # Get default camera
+        try:
+            default_camera = get_default_camera()
+            print(f"Using camera device {default_camera}")
+        except Exception as e:
+            print(f"Error finding camera: {e}")
+            sys.exit(1)
+        
+        # Collect and validate session metadata
+        metadata = get_session_metadata()
+        validate_metadata(metadata)
+        
+        # Setup session directory
+        session_dir = setup_session_directory(metadata)
+        
+        print("\nSession Information:")
+        print(f"Participant ID: {metadata['participant']['id']}")
+        print(f"Session ID: {metadata['session']['id']}")
+        print(f"Task Type: {metadata['experiment']['task_type']}")
+        print(f"Duration: {metadata['experiment']['duration']} minutes")
+        
+        # Import and initialize the eye tracker
+        from pyEyeTrack import PyEyeTrackRunner
+        tracker = PyEyeTrackRunner(
+            participant_id=metadata['participant']['id'],
+            session_id=metadata['session']['id'],
+            metadata=metadata
+        )
+        
+        # Launch admin GUI
+        app, admin_window = launch_admin_gui(tracker)
+        
+        print("\nStarting eye tracking...")
+        print("Controls:")
+        print("Press 'r' to start/stop recording")
+        print("Press 'q' to quit")
+        print("Press 's' to add a marker/note")
+        print("Press 'p' to pause/resume\n")
+        
+        # Initialize camera
+        tracker.switch_camera(default_camera)
+        
+        # Run the eye tracking
+        tracker.pyEyeTrack_runner(
+            source=default_camera,  # Use detected camera
+            pupilTracking=True,  # Enable pupil tracking
+            videoRecording=False,  # Disable video recording
+            audioRecording=False,  # Disable audio recording
+            destinationPath=session_dir  # Use organized session directory
+        )
+        
+        # Start Qt event loop
+        sys.exit(app.exec_())
+        
     except KeyboardInterrupt:
-        print("\nSession setup cancelled by user.")
-        sys.exit(0)
-    
-    # Launch the application
-    launch_application(session_id)
+        print("\nEye tracking stopped by user.")
+    except Exception as e:
+        print(f"Error running PyEyeTrack: {e}")
+        sys.exit(1)
+    finally:
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nApplication terminated by user.")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\nUnexpected error: {str(e)}")
-        sys.exit(1) 
+    main() 
