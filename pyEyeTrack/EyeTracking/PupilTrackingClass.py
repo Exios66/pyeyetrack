@@ -1,4 +1,4 @@
-from pyEyeTrack.EyeTracking.AbstractEyeTrackingClass import EyeTracking
+from .AbstractEyeTrackingClass import EyeTracking
 import numpy as np
 import pandas as pd
 import cv2
@@ -10,25 +10,7 @@ import os
 
 class PupilTracking(EyeTracking):
     """
-    A subclass of EyeTracking that does pupil tracking 
-    i.e. this class will give the pupil centers for both the eyes.
-
-    Methods:
-        detect_eye(eye_points,facial_landmarks)
-            Returns the location of the eye in the frame.
-        get_connected_components(thresholded_pupil_region)
-            Calculates the pupil center.
-        get_approximate_pupil_rectangle(eye_landmarks_coordinates,frame)
-            Returns the part of the frame with only the pupil
-        get_pupil_center_coordinates(eye_landmarks_coordinates,threshold,
-        frame)
-            Returns pupil center for a single eye.
-        functionality(frame)
-            Implements pupil tracking for a given frame.
-        csv_writer(file_name)
-            Generates a .csv file with the timestamp and pupil center 
-            for both eyes.
-
+    A class for tracking pupils in video frames.
     """
 
     def __init__(self, source=0, session_id=None):
@@ -180,97 +162,67 @@ class PupilTracking(EyeTracking):
 
         return self.get_connected_components(thresholded_pupil_region)
 
-    def functionality(self, frame):
+    def detect_pupil(self, frame):
         """
-        This method overrides the method in the superclass. 
-        This method gets the pupil center for both the eyes in the frame.
-        Once the pupil centers are acquired we append them in eye_data_log 
-        dictonary along with the timestamp.
-        We also add this data to the queue for real-time data transfer. 
-        Finally, we also toggle the close_flag if the string 'Stop' is found
-        in the queue. This can be used by the user to stop the application.
-
+        Detect pupils in the frame
         Args:
-            frame (numpy array): it is the frame in the video or captured 
-            by the camera
-        """
-
-        landmarks_coordinates_left_eye = self.detect_eye(
-            [36, 37, 38, 39, 40, 41], self.landmarks)
-        landmarks_coordinates_right_eye = self.detect_eye(
-            [42, 43, 44, 45, 46, 47], self.landmarks)
-
-        pupil_center_left_eye = self.get_pupil_center_coordinates(
-            landmarks_coordinates_left_eye, 0, frame)
-        pupil_center_right_eye = self.get_pupil_center_coordinates(
-            landmarks_coordinates_right_eye, 0, frame)
-
-        timestamp = time.time()
-        self.eye_data_log["Timestamps"].append(timestamp)
-        self.eye_data_log["Left_Eye_X"].append(pupil_center_left_eye[0])
-        self.eye_data_log["Left_Eye_Y"].append(pupil_center_left_eye[1])
-        self.eye_data_log["Right_Eye_X"].append(pupil_center_right_eye[0])
-        self.eye_data_log["Right_Eye_Y"].append(pupil_center_right_eye[1])
-        pupil_center_data = (
-            timestamp,
-            pupil_center_left_eye[0],
-            pupil_center_left_eye[1],
-            pupil_center_right_eye[0],
-            pupil_center_right_eye[1])
-        self.queue_handler.add_data(pupil_center_data)
-
-        if self.queue_handler.search_element('Stop'):
-            self.close_flag = True
-
-    def csv_writer(self, data):
-        """
-        Write tracking data to a CSV file.
-        """
-        df = pd.DataFrame(data)
-        
-        # Create Output directory if it doesn't exist
-        os.makedirs('Output', exist_ok=True)
-        
-        # Generate timestamp for unique filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        file_path = os.path.join('Output', f'eye_tracking_data_{timestamp}.csv')
-        
-        df.to_csv(file_path, index=False)
-
-    def get_eye_coordinates(self, landmarks):
-        """
-        Extract eye coordinates from facial landmarks
-        Args:
-            landmarks: Facial landmarks from MediaPipe FaceMesh
+            frame: Input frame
         Returns:
-            Dictionary containing coordinates for left and right eyes
+            tuple: (processed frame, pupil coordinates)
         """
-        # MediaPipe FaceMesh eye landmarks
-        LEFT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
-        RIGHT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
-
-        def get_eye_rect(eye_indices):
-            points = np.array([(int(landmarks.landmark[idx].x * self.frame.shape[1]),
-                              int(landmarks.landmark[idx].y * self.frame.shape[0]))
-                             for idx in eye_indices])
-            x, y = points[:, 0], points[:, 1]
-            return {
-                'left': min(x),
-                'top': min(y),
-                'right': max(x),
-                'bottom': max(y)
-            }
-
-        left_eye = get_eye_rect(LEFT_EYE)
-        right_eye = get_eye_rect(RIGHT_EYE)
+        # Convert frame to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        return {'left_eye': left_eye, 'right_eye': right_eye}
+        # Detect faces
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        if len(faces) == 0:
+            return frame, None
+            
+        # Get the first face detected
+        (x, y, w, h) = faces[0]
+        face_gray = gray[y:y+h, x:x+w]
+        
+        # Draw face rectangle
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        
+        # Detect eyes in the face region
+        eyes = self.eye_cascade.detectMultiScale(face_gray)
+        
+        if len(eyes) < 2:
+            return frame, None
+            
+        # Sort eyes by x-coordinate to determine left and right
+        eyes = sorted(eyes, key=lambda e: e[0])  # Sort by x coordinate
+        left_eye, right_eye = eyes[:2]  # Get the leftmost and rightmost eyes
+        
+        # Adjust eye coordinates to frame coordinates
+        left_eye = (left_eye[0] + x, left_eye[1] + y, left_eye[2], left_eye[3])
+        right_eye = (right_eye[0] + x, right_eye[1] + y, right_eye[2], right_eye[3])
+        
+        # Draw eye regions
+        cv2.rectangle(frame, (left_eye[0], left_eye[1]), 
+                     (left_eye[0] + left_eye[2], left_eye[1] + left_eye[3]), (0, 255, 0), 2)
+        cv2.rectangle(frame, (right_eye[0], right_eye[1]), 
+                     (right_eye[0] + right_eye[2], right_eye[1] + right_eye[3]), (0, 255, 0), 2)
+        
+        # Detect pupils
+        left_pupil = self._detect_pupil_in_region(gray, left_eye)
+        right_pupil = self._detect_pupil_in_region(gray, right_eye)
+        
+        if left_pupil and right_pupil:
+            # Draw pupil centers
+            cv2.circle(frame, left_pupil, 2, (0, 0, 255), -1)
+            cv2.circle(frame, right_pupil, 2, (0, 0, 255), -1)
+            return frame, (left_pupil, right_pupil)
+            
+        return frame, None
 
-    def detect_pupil(self, frame, eye_region):
+    def _detect_pupil_in_region(self, frame, eye_region):
         """
         Detect pupil center in eye region
         Args:
-            frame: Input grayscale frame
+            frame: Input frame
             eye_region: Tuple of (x, y, w, h) for eye region
         Returns:
             Tuple of (x, y) coordinates of pupil center in frame coordinates
@@ -280,6 +232,10 @@ class PupilTracking(EyeTracking):
         
         if eye.size == 0:
             return None
+            
+        # Convert to grayscale if needed
+        if len(eye.shape) == 3:
+            eye = cv2.cvtColor(eye, cv2.COLOR_BGR2GRAY)
 
         # Enhance contrast
         eye = cv2.equalizeHist(eye)
@@ -312,60 +268,67 @@ class PupilTracking(EyeTracking):
 
     def functionality(self, frame):
         """
-        Process each frame for pupil tracking
+        Process frame for pupil tracking
         Args:
-            frame: Input grayscale frame
+            frame: Input frame
         """
-        if len(self.eyes) < 2:
-            return
-            
-        # Sort eyes by x-coordinate to determine left and right
-        (fx, fy, fw, fh) = self.face
-        face_frame = frame[fy:fy+fh, fx:fx+fw]
+        # This method is called by the parent class's start() method
+        # The parent class handles face and eye detection
+        # We just need to detect pupils and store the data
+        processed_frame, pupil_coords = self.detect_pupil(frame)
         
-        eyes = sorted(self.eyes, key=lambda e: e[0])  # Sort by x coordinate
-        left_eye, right_eye = eyes[:2]  # Get the leftmost and rightmost eyes
+        if pupil_coords:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+            self.data['Session_ID'].append(self.session_id)
+            self.data['Time'].append(timestamp)
+            self.data['Left_Pupil_X'].append(pupil_coords[0][0])
+            self.data['Left_Pupil_Y'].append(pupil_coords[0][1])
+            self.data['Right_Pupil_X'].append(pupil_coords[1][0])
+            self.data['Right_Pupil_Y'].append(pupil_coords[1][1])
+
+    def csv_writer(self, data):
+        """
+        Write tracking data to a CSV file.
+        Args:
+            data: Dictionary containing tracking data
+        """
+        df = pd.DataFrame(data)
         
-        # Adjust eye coordinates to frame coordinates
-        left_eye = (left_eye[0] + fx, left_eye[1] + fy, left_eye[2], left_eye[3])
-        right_eye = (right_eye[0] + fx, right_eye[1] + fy, right_eye[2], right_eye[3])
+        # Create Output directory if it doesn't exist
+        os.makedirs('Output', exist_ok=True)
         
-        # Detect pupils
-        left_pupil = self.detect_pupil(frame, left_eye)
-        right_pupil = self.detect_pupil(frame, right_eye)
+        # Generate timestamp for unique filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_path = os.path.join('Output', f'eye_tracking_data_{timestamp}.csv')
         
-        # Store data
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        self.data['Session_ID'].append(self.session_id)
-        self.data['Time'].append(current_time)
+        df.to_csv(file_path, index=False)
+        print(f"Data saved to {file_path}")
+
+    def get_eye_coordinates(self, landmarks):
+        """
+        Extract eye coordinates from facial landmarks
+        Args:
+            landmarks: Facial landmarks from MediaPipe FaceMesh
+        Returns:
+            Dictionary containing coordinates for left and right eyes
+        """
+        # MediaPipe FaceMesh eye landmarks
+        LEFT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+        RIGHT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+
+        def get_eye_rect(eye_indices):
+            points = np.array([(int(landmarks.landmark[idx].x * self.frame.shape[1]),
+                              int(landmarks.landmark[idx].y * self.frame.shape[0]))
+                             for idx in eye_indices])
+            x, y = points[:, 0], points[:, 1]
+            return {
+                'left': min(x),
+                'top': min(y),
+                'right': max(x),
+                'bottom': max(y)
+            }
+
+        left_eye = get_eye_rect(LEFT_EYE)
+        right_eye = get_eye_rect(RIGHT_EYE)
         
-        # Draw eye regions
-        cv2.rectangle(self.frame, (left_eye[0], left_eye[1]), 
-                     (left_eye[0] + left_eye[2], left_eye[1] + left_eye[3]), (0, 255, 0), 2)
-        cv2.rectangle(self.frame, (right_eye[0], right_eye[1]), 
-                     (right_eye[0] + right_eye[2], right_eye[1] + right_eye[3]), (0, 255, 0), 2)
-        
-        if left_pupil:
-            self.data['Left_Pupil_X'].append(left_pupil[0])
-            self.data['Left_Pupil_Y'].append(left_pupil[1])
-            # Draw pupil center
-            cv2.circle(self.frame, left_pupil, 2, (0, 0, 255), -1)
-        else:
-            self.data['Left_Pupil_X'].append(None)
-            self.data['Left_Pupil_Y'].append(None)
-            
-        if right_pupil:
-            self.data['Right_Pupil_X'].append(right_pupil[0])
-            self.data['Right_Pupil_Y'].append(right_pupil[1])
-            # Draw pupil center
-            cv2.circle(self.frame, right_pupil, 2, (0, 0, 255), -1)
-        else:
-            self.data['Right_Pupil_X'].append(None)
-            self.data['Right_Pupil_Y'].append(None)
-            
-        # Display session ID on frame
-        cv2.putText(self.frame, f"Session: {self.session_id}", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            
-        # Display the frame
-        cv2.imshow('Eye Tracking', self.frame)
+        return {'left_eye': left_eye, 'right_eye': right_eye}
