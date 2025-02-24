@@ -222,26 +222,20 @@ class PupilTracking(EyeTracking):
         if self.queue_handler.search_element('Stop'):
             self.close_flag = True
 
-    def csv_writer(self, file_name=None):
+    def csv_writer(self, data):
         """
-        Generates a .csv file with the timestamp and pupil centers.
-        Args:
-            file_name (string): Optional base name for the .csv file. If not provided,
-                              will use session_id.
+        Write tracking data to a CSV file.
         """
-        output_dir = "Output"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            
-        if file_name is None:
-            file_name = f"eye_tracking_{self.session_id}.csv"
-        else:
-            file_name = f"{file_name}_{self.session_id}.csv"
-            
-        file_path = os.path.join(output_dir, file_name)
-        df = pd.DataFrame(self.data)
+        df = pd.DataFrame(data)
+        
+        # Create Output directory if it doesn't exist
+        os.makedirs('Output', exist_ok=True)
+        
+        # Generate timestamp for unique filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_path = os.path.join('Output', f'eye_tracking_data_{timestamp}.csv')
+        
         df.to_csv(file_path, index=False)
-        print(f"Data saved to {file_path}")
 
     def get_eye_coordinates(self, landmarks):
         """
