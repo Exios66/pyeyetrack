@@ -3,6 +3,7 @@
 A Python-based eye tracking application that uses OpenCV for face detection and pupil tracking.
 
 ## Features
+
 - Real-time pupil tracking
 - Session-based data collection
 - CSV output with timestamps
@@ -10,6 +11,7 @@ A Python-based eye tracking application that uses OpenCV for face detection and 
 - Automatic dependency management
 
 ## Requirements
+
 - Python 3.6 or higher
 - Webcam
 - Good lighting conditions
@@ -17,17 +19,20 @@ A Python-based eye tracking application that uses OpenCV for face detection and 
 ## Quick Start
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/yourusername/pyeyetrack.git
 cd pyeyetrack
 ```
 
 2. Launch the application:
+
 ```bash
 python launch_app.py
 ```
 
 The launch script will:
+
 - Check and install required dependencies
 - Create necessary directories
 - Download required model files (if needed)
@@ -55,6 +60,7 @@ The launch script will:
 ## Output
 
 The application generates CSV files in the `Output` directory with the following format:
+
 - Filename: `participant_<participant_id>_<timestamp>.csv`
 - Contents:
   - Session_ID: Unique session identifier
