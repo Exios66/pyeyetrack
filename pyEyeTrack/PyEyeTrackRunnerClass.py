@@ -21,17 +21,32 @@ class PyEyeTrackRunner:
         """
         self.running = True
         self.recording = False
+        self.window_name = "PyEyeTrack"
+        cv2.namedWindow(self.window_name)
 
     def check_key(self):
         """
-        Check for keyboard input using cv2.waitKey instead of keyboard module.
+        Check for keyboard input using cv2.waitKey.
         """
-        while self.running:
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):  # Press 'q' to quit
-                self.running = False
-            elif key == ord('r'):  # Press 'r' to toggle recording
-                self.recording = not self.recording
+        try:
+            while self.running:
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    self.running = False
+                elif key == ord('r'):
+                    self.recording = not self.recording
+                    status = "Started" if self.recording else "Stopped"
+                    print(f"Recording {status}")
+        except Exception as e:
+            print(f"Error in key checking: {str(e)}")
+            self.running = False
+
+    def cleanup(self):
+        """
+        Clean up resources.
+        """
+        cv2.destroyAllWindows()
+        self.running = False
 
     def pyEyeTrack_runner(
         self,
@@ -42,94 +57,54 @@ class PyEyeTrackRunner:
         destinationPath="./Output"
     ):
         """
-        Main function to run eye tracking and recording.
-        Args:
-            source (int/str): Camera index or video file path (default: 0)
-            pupilTracking (bool): Enable pupil tracking (default: True)
-            videoRecording (bool): Enable video recording (default: True)
-            audioRecording (bool): Enable audio recording (default: False)
-            destinationPath (str): Output directory path (default: "./Output")
+        Main runner method for eye tracking.
         """
-        # Create output directory if it doesn't exist
-        os.makedirs(destinationPath, exist_ok=True)
-
-        # Initialize video capture
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            print("Error: Could not open video source")
-            return
-
-        # Initialize components
-        eyeTracking = PupilTracking(source=source) if pupilTracking else None
-        videoRecorder = VideoRecorder() if videoRecording else None
-        audioRecorder = None
-        if audioRecording and AUDIO_AVAILABLE:
-            try:
-                audioRecorder = AudioRecorder()
-            except Exception as e:
-                print(f"Error initializing audio recorder: {e}")
-                audioRecording = False
-
-        # Start keyboard monitoring thread
-        keyboard_thread = threading.Thread(target=self.check_key)
-        keyboard_thread.daemon = True
-        keyboard_thread.start()
-
-        print("Press 'r' to start/stop recording")
-        print("Press 'q' to quit")
-
-        eyeTrackingOutput = {
-            'timestamp': [],
-            'left_pupil_x': [],
-            'left_pupil_y': [],
-            'right_pupil_x': [],
-            'right_pupil_y': []
-        }
-
         try:
+            # Create output directory if it doesn't exist
+            os.makedirs(destinationPath, exist_ok=True)
+
+            # Initialize video capture
+            cap = cv2.VideoCapture(source)
+            if not cap.isOpened():
+                raise Exception("Could not open video source")
+
+            # Start key checking thread
+            key_thread = threading.Thread(target=self.check_key)
+            key_thread.daemon = True
+            key_thread.start()
+
+            # Initialize components
+            if pupilTracking:
+                pupil_tracker = PupilTracking()
+
+            if videoRecording:
+                video_recorder = VideoRecorder(destinationPath)
+
+            if audioRecording and AUDIO_AVAILABLE:
+                audio_recorder = AudioRecorder(destinationPath)
+
             while self.running:
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                # Process frame for eye tracking
-                if pupilTracking and eyeTracking:
-                    frame, pupil_coords = eyeTracking.detect_pupil(frame)
-                    if pupil_coords:
-                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-                        eyeTrackingOutput['timestamp'].append(timestamp)
-                        eyeTrackingOutput['left_pupil_x'].append(pupil_coords[0][0])
-                        eyeTrackingOutput['left_pupil_y'].append(pupil_coords[0][1])
-                        eyeTrackingOutput['right_pupil_x'].append(pupil_coords[1][0])
-                        eyeTrackingOutput['right_pupil_y'].append(pupil_coords[1][1])
+                if pupilTracking:
+                    frame = pupil_tracker.pupil_tracking(frame)
 
-                # Handle recording
                 if self.recording:
-                    if videoRecording and videoRecorder:
-                        videoRecorder.write_frame(frame)
-                    if audioRecording and audioRecorder:
-                        audioRecorder.write_audio()
+                    if videoRecording:
+                        video_recorder.write_frame(frame)
+                    if audioRecording and AUDIO_AVAILABLE:
+                        audio_recorder.write_audio()
 
-                # Display frame
-                cv2.imshow('Eye Tracking', frame)
+                # Show the frame
+                cv2.imshow(self.window_name, frame)
 
-        except KeyboardInterrupt:
-            print("\nStopping...")
+        except Exception as e:
+            print(f"Error in eye tracking: {str(e)}")
         finally:
-            # Cleanup
-            self.running = False
-            cv2.destroyAllWindows()
-            cap.release()
-
-            if videoRecording and videoRecorder:
-                videoRecorder.close()
-            if audioRecording and audioRecorder:
-                audioRecorder.close()
-
-            # Save eye tracking data
-            if pupilTracking and eyeTracking and eyeTrackingOutput['timestamp']:
-                eyeTracking.csv_writer(eyeTrackingOutput)
-
-            print("Session ended")
+            if 'cap' in locals():
+                cap.release()
+            self.cleanup()
 
                                                     
