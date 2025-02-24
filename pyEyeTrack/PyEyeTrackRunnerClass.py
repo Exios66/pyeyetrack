@@ -244,7 +244,11 @@ class PyEyeTrackRunner:
                 
                 logger.info(f"\nRecording Summary:")
                 logger.info(f"Total Frames: {stats['total_frames']}")
-                logger.info(f"Dropped Frames: {stats['dropped_frames']} ({(stats['dropped_frames']/stats['total_frames']*100):.2f}%)")
+                if stats['total_frames'] > 0:
+                    dropped_percentage = (stats['dropped_frames'] / stats['total_frames'] * 100)
+                    logger.info(f"Dropped Frames: {stats['dropped_frames']} ({dropped_percentage:.2f}%)")
+                else:
+                    logger.info(f"Dropped Frames: {stats['dropped_frames']} (0.00%)")
                 logger.info(f"Average Frame Rate: {stats['frame_rate']:.2f} fps")
                 logger.info(f"Recording Duration: {stats['recording_duration']:.2f} seconds")
                 logger.info(f"Data saved to {csv_path}")

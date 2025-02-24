@@ -321,9 +321,10 @@ class TestPyEyeTrack(unittest.TestCase):
         self.tracker.data_dir = os.path.join(self.test_data_dir, "data")
         os.makedirs(self.tracker.data_dir, exist_ok=True)
         
-        # Simulate some performance data
-        self.tracker.frame_times = [0.033] * 30  # Simulate 30fps
-        self.tracker.processing_times = [0.016] * 30
+        # Simulate exactly 30fps (1/30 = 0.0333... seconds per frame)
+        frame_time = 1.0 / 30.0  # Exactly 30 FPS
+        self.tracker.frame_times = [frame_time] * 30
+        self.tracker.processing_times = [frame_time/2] * 30  # Processing time half of frame time
         self.tracker.dropped_frames = 5
         self.tracker.total_frames = 100
         
@@ -341,11 +342,11 @@ class TestPyEyeTrack(unittest.TestCase):
             self.assertIn('total_frames', stats)
             self.assertIn('average_processing_time', stats)
             
-            # Verify the stats values
+            # Verify the stats values with appropriate tolerance
             self.assertAlmostEqual(stats['average_fps'], 30.0, places=1)
             self.assertEqual(stats['dropped_frames'], 5)
             self.assertEqual(stats['total_frames'], 100)
-            self.assertAlmostEqual(stats['average_processing_time'], 0.016, places=3)
+            self.assertAlmostEqual(stats['average_processing_time'], frame_time/2, places=3)
 
 def main():
     """Run the test suite"""
