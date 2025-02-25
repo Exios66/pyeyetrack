@@ -281,11 +281,21 @@ class TestPyEyeTrack(unittest.TestCase):
         
         # Verify data files were created
         self.assertTrue(os.path.exists(self.tracker.data_dir))
-        csv_files = [f for f in os.listdir(self.tracker.data_dir) if f.endswith('.csv')]
-        self.assertGreater(len(csv_files), 0)
+        
+        # Look for recording directories
+        recording_dirs = [d for d in os.listdir(self.tracker.data_dir) if d.startswith('recording_')]
+        self.assertGreater(len(recording_dirs), 0, "No recording directories found")
+        
+        # Get the most recent recording directory
+        latest_recording = sorted(recording_dirs)[-1]
+        recording_path = os.path.join(self.tracker.data_dir, latest_recording)
+        
+        # Look for CSV files in the recording directory
+        csv_files = [f for f in os.listdir(recording_path) if f.endswith('.csv')]
+        self.assertGreater(len(csv_files), 0, "No CSV files found in recording directory")
         
         # Verify data content
-        csv_path = os.path.join(self.tracker.data_dir, csv_files[0])
+        csv_path = os.path.join(recording_path, csv_files[0])
         df = pd.read_csv(csv_path)
         self.assertEqual(len(df), 1)  # Should have one row
         self.assertEqual(df['left_eye_x'].iloc[0], 100)

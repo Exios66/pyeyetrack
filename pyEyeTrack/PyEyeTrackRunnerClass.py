@@ -169,18 +169,21 @@ class PyEyeTrackRunner:
         """Create a new session directory with timestamp and proper organization."""
         # Determine if this is a pilot or live session from metadata
         session_type = self.metadata.get('session_type', 'live')  # Default to live if not specified
+        data_type_dir = "pilot_data" if session_type == 'pilot' else "live_data"
         
-        # Create the full directory path
+        # Create the full directory path with pilot/live separation
         self.session_dir = os.path.join(
             base_dir,
-            'data'
+            data_type_dir,
+            f"participant_{self.participant_id}",
+            f"session_{self.session_id}"
         )
         
         # Set up data directories
-        self.data_dir = os.path.join(self.session_dir, "raw_data")
-        self.processed_dir = os.path.join(self.session_dir, "processed_data")
-        self.export_dir = os.path.join(base_dir, "exports")
-        self.log_dir = os.path.join(base_dir, "logs")
+        self.data_dir = os.path.join(self.session_dir, "data", "raw_data")
+        self.processed_dir = os.path.join(self.session_dir, "data", "processed_data")
+        self.export_dir = os.path.join(self.session_dir, "exports")
+        self.log_dir = os.path.join(self.session_dir, "logs")
         
         # Create all necessary directories
         for directory in [self.data_dir, self.processed_dir, self.export_dir, self.log_dir]:
@@ -194,7 +197,7 @@ class PyEyeTrackRunner:
             f.write(f"Session ID: {self.session_id}\n")
             f.write(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
-        logger.info(f"Created session directory structure in {base_dir}")
+        logger.info(f"Created session directory structure in {self.session_dir}")
         logger.info(f"Session Type: {session_type}")
         logger.info(f"Raw data will be saved to: {self.data_dir}")
         
@@ -226,74 +229,169 @@ class PyEyeTrackRunner:
 
     def save_eye_data(self) -> None:
         """
-        Save eye tracking data to CSV file with enhanced organization.
+        Save eye tracking data to CSV file with enhanced organization and validation.
+        
         Raises:
-            Exception: If data directory is not set or if there's an error saving data
+            Exception: If data directory is not set
+            ValueError: If eye data is invalid or empty
+            OSError: If there's an error creating directories or saving files
         """
         if self.data_dir is None:
             raise Exception("Data directory not set")
+        
+        if not self.eye_data or len(self.eye_data.get('timestamp', [])) == 0:
+            raise ValueError("No eye tracking data available to save")
+        
+        try:
+            # Generate timestamp and validate data
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self._validate_eye_data()
             
-        if len(self.eye_data['timestamp']) > 0:
-            try:
-                # Create DataFrame with all collected metrics
-                df = pd.DataFrame(self.eye_data)
-                
-                # Add recording statistics
-                stats = {
-                    'total_frames': self.total_frames,
-                    'dropped_frames': self.dropped_frames,
-                    'frame_rate': self.total_frames / (time.time() - self.start_time) if self.start_time else 0,
-                    'recording_duration': time.time() - self.start_time if self.start_time else 0,
-                    'camera_id': self.current_camera
-                }
-                
-                # Save raw data
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                csv_filename = f"eye_tracking_data_{timestamp}.csv"
-                csv_path = os.path.join(self.data_dir, csv_filename)
-                df.to_csv(csv_path, index=False)
-                
-                # Save markers
-                if self.markers:
-                    markers_file = os.path.join(self.data_dir, f"markers_{timestamp}.json")
-                    with open(markers_file, 'w') as f:
-                        json.dump(self.markers, f, indent=4)
-                
-                # Save notes
-                if self.notes:
-                    notes_file = os.path.join(self.data_dir, f"notes_{timestamp}.json")
-                    with open(notes_file, 'w') as f:
-                        json.dump(self.notes, f, indent=4)
-                
-                # Save statistics
-                stats_file = os.path.join(self.data_dir, f"recording_stats_{timestamp}.json")
-                with open(stats_file, 'w') as f:
-                    json.dump(stats, f, indent=4)
-                
-                logger.info(f"\nRecording Summary:")
-                logger.info(f"Total Frames: {stats['total_frames']}")
-                if stats['total_frames'] > 0:
-                    dropped_percentage = (stats['dropped_frames'] / stats['total_frames'] * 100)
-                    logger.info(f"Dropped Frames: {stats['dropped_frames']} ({dropped_percentage:.2f}%)")
-                else:
-                    logger.info(f"Dropped Frames: {stats['dropped_frames']} (0.00%)")
-                logger.info(f"Average Frame Rate: {stats['frame_rate']:.2f} fps")
-                logger.info(f"Recording Duration: {stats['recording_duration']:.2f} seconds")
-                logger.info(f"Data saved to {csv_path}")
-                
-                # Clear the data for next recording
-                for key in self.eye_data:
-                    self.eye_data[key] = []
-                self.frame_count = 0
-                self.total_frames = 0
-                self.dropped_frames = 0
-                self.start_time = None
-                self.markers = []
-                self.notes = []
-                
-            except Exception as e:
-                logger.error(f"Error saving eye tracking data: {str(e)}")
-                raise
+            # Create DataFrame with all collected metrics
+            df = pd.DataFrame(self.eye_data)
+            
+            # Calculate recording statistics
+            stats = self._calculate_recording_stats(timestamp)
+            
+            # Create session directory structure
+            session_dir = self._create_session_directory(timestamp)
+            
+            # Save raw data with proper permissions
+            csv_filename = f"eye_tracking_data_{timestamp}.csv"
+            csv_path = os.path.join(session_dir, "data", "raw_data", csv_filename)
+            df.to_csv(csv_path, index=False)
+            os.chmod(csv_path, 0o644)  # rw-r--r--
+            
+            # Save additional files
+            self._save_additional_files(session_dir, timestamp, stats)
+            
+            # Log recording summary
+            self._log_recording_summary(stats)
+            
+            # Clear data after successful save
+            self.eye_data = {k: [] for k in self.eye_data.keys()}
+            logger.info(f"Data successfully saved to {csv_path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving eye tracking data: {str(e)}")
+            raise
+
+    def _validate_eye_data(self) -> None:
+        """Validate eye tracking data before saving."""
+        required_fields = ['timestamp', 'frame_number', 'left_eye_x', 'left_eye_y', 
+                          'right_eye_x', 'right_eye_y']
+        
+        for field in required_fields:
+            if field not in self.eye_data or not self.eye_data[field]:
+                raise ValueError(f"Missing required field: {field}")
+            
+        # Validate data types and ranges
+        for x, y in zip(self.eye_data['left_eye_x'], self.eye_data['left_eye_y']):
+            if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
+                raise ValueError("Invalid coordinate types in eye tracking data")
+            if x < 0 or y < 0:
+                raise ValueError("Invalid negative coordinates in eye tracking data")
+
+    def _calculate_recording_stats(self, timestamp: str) -> Dict[str, Any]:
+        """Calculate comprehensive recording statistics."""
+        recording_duration = time.time() - self.start_time if self.start_time else 0
+        frame_rate = self.total_frames / recording_duration if recording_duration > 0 else 0
+        
+        return {
+            'session_info': {
+                'participant_id': self.participant_id,
+                'session_id': self.session_id,
+                'session_type': self.metadata.get('session_type', 'live'),
+                'timestamp': timestamp,
+                'recording_start': self.start_time,
+                'recording_end': time.time()
+            },
+            'performance': {
+                'total_frames': self.total_frames,
+                'dropped_frames': self.dropped_frames,
+                'frame_rate': frame_rate,
+                'recording_duration': recording_duration,
+                'camera_id': self.current_camera
+            },
+            'data_quality': {
+                'average_quality_score': np.mean(self.eye_data['data_quality']) if self.eye_data['data_quality'] else 0,
+                'total_blinks': sum(self.eye_data['left_blink']) + sum(self.eye_data['right_blink']),
+                'valid_gaze_points': sum(1 for x, y in zip(self.eye_data['gaze_x'], self.eye_data['gaze_y']) 
+                                       if x > 0 and y > 0),
+                'data_completeness': len(self.eye_data['timestamp']) / self.total_frames if self.total_frames > 0 else 0
+            }
+        }
+
+    def _create_session_directory(self, timestamp: str) -> str:
+        """Create organized directory structure for the session."""
+        # Determine session type directory
+        data_type_dir = "pilot_data" if self.metadata.get('session_type') == 'pilot' else "live_data"
+        
+        # Create full directory path
+        session_dir = os.path.join(
+            self.data_dir,
+            data_type_dir,
+            f"participant_{self.participant_id}",
+            f"session_{self.session_id}",
+            f"recording_{timestamp}"
+        )
+        
+        # Create subdirectories with proper permissions
+        subdirs = [
+            'data/raw_data',
+            'data/processed_data',
+            'metadata',
+            'analysis',
+            'logs'
+        ]
+        
+        for subdir in subdirs:
+            dir_path = os.path.join(session_dir, subdir)
+            os.makedirs(dir_path, exist_ok=True)
+            os.chmod(dir_path, 0o755)  # rwxr-xr-x
+        
+        return session_dir
+
+    def _save_additional_files(self, session_dir: str, timestamp: str, stats: Dict[str, Any]) -> None:
+        """Save additional files like markers, notes, and statistics."""
+        # Save markers if available
+        if self.markers:
+            markers_file = os.path.join(session_dir, "metadata", f"markers_{timestamp}.json")
+            with open(markers_file, 'w') as f:
+                json.dump(self.markers, f, indent=4)
+            os.chmod(markers_file, 0o644)
+        
+        # Save notes if available
+        if self.notes:
+            notes_file = os.path.join(session_dir, "metadata", f"notes_{timestamp}.json")
+            with open(notes_file, 'w') as f:
+                json.dump(self.notes, f, indent=4)
+            os.chmod(notes_file, 0o644)
+        
+        # Save statistics
+        stats_file = os.path.join(session_dir, "metadata", f"recording_stats_{timestamp}.json")
+        with open(stats_file, 'w') as f:
+            json.dump(stats, f, indent=4)
+        os.chmod(stats_file, 0o644)
+
+    def _log_recording_summary(self, stats: Dict[str, Any]) -> None:
+        """Log a comprehensive recording summary."""
+        logger.info("\nRecording Summary:")
+        logger.info(f"Session Type: {stats['session_info']['session_type']}")
+        logger.info(f"Participant ID: {stats['session_info']['participant_id']}")
+        logger.info(f"Session ID: {stats['session_info']['session_id']}")
+        logger.info(f"Total Frames: {stats['performance']['total_frames']}")
+        
+        if stats['performance']['total_frames'] > 0:
+            dropped_percentage = (stats['performance']['dropped_frames'] / stats['performance']['total_frames'] * 100)
+            logger.info(f"Dropped Frames: {stats['performance']['dropped_frames']} ({dropped_percentage:.2f}%)")
+            logger.info(f"Average Frame Rate: {stats['performance']['frame_rate']:.2f} FPS")
+            logger.info(f"Data Completeness: {stats['data_quality']['data_completeness']*100:.2f}%")
+            logger.info(f"Average Quality Score: {stats['data_quality']['average_quality_score']:.2f}")
+        
+        logger.info(f"Recording Duration: {stats['performance']['recording_duration']:.2f} seconds")
+        logger.info(f"Total Blinks Detected: {stats['data_quality']['total_blinks']}")
+        logger.info(f"Valid Gaze Points: {stats['data_quality']['valid_gaze_points']}")
 
     def process_key(self, key):
         """Process a key press event."""
@@ -408,10 +506,9 @@ class PyEyeTrackRunner:
             # Create session directory
             self.session_dir = self.create_session_directory(destinationPath)
 
-            # Initialize video capture
-            cap = cv2.VideoCapture(source)
-            if not cap.isOpened():
-                raise Exception("Could not open video source")
+            # Initialize camera with proper detection
+            if not self.initialize_camera(source):
+                raise Exception("Could not initialize any camera. Please check your camera connection.")
 
             # Initialize window
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -428,9 +525,10 @@ class PyEyeTrackRunner:
 
             while self.running:
                 if not self.paused:
-                    ret, frame = cap.read()
+                    ret, frame = self.cap.read()
                     if not ret:
                         self.dropped_frames += 1
+                        logger.warning("Failed to read frame from camera")
                         continue
 
                     self.total_frames += 1
@@ -480,10 +578,77 @@ class PyEyeTrackRunner:
                             break
 
         except Exception as e:
-            print(f"Error in eye tracking: {str(e)}")
+            logger.error(f"Error in eye tracking: {str(e)}")
+            raise
         finally:
-            if 'cap' in locals():
-                cap.release()
+            if hasattr(self, 'cap') and self.cap is not None:
+                self.cap.release()
+            cv2.destroyAllWindows()
             self.cleanup()
+
+    def detect_cameras(self) -> list:
+        """
+        Detect available cameras and their indices.
+        Returns:
+            list: List of available camera indices
+        """
+        available_cameras = []
+        max_to_test = 2  # Limit initial search to first 2 indices to avoid long startup
+        
+        logger.info("Detecting available cameras...")
+        for i in range(max_to_test):
+            temp_cap = cv2.VideoCapture(i, cv2.CAP_ANY)
+            if temp_cap.isOpened():
+                ret, frame = temp_cap.read()
+                if ret:
+                    available_cameras.append(i)
+                    logger.info(f"Camera {i} is available")
+                temp_cap.release()
+            else:
+                logger.debug(f"Camera {i} is not available")
+        
+        if not available_cameras:
+            logger.warning("No cameras detected!")
+        
+        return available_cameras
+
+    def initialize_camera(self, source=0) -> bool:
+        """
+        Initialize the camera with proper error handling.
+        Args:
+            source: Camera index to try
+        Returns:
+            bool: True if camera was successfully initialized
+        """
+        available_cameras = self.detect_cameras()
+        
+        if not available_cameras:
+            logger.error("No cameras available. Please check your camera connection.")
+            return False
+            
+        if source not in available_cameras:
+            logger.warning(f"Requested camera {source} not available. Using camera {available_cameras[0]} instead.")
+            source = available_cameras[0]
+        
+        try:
+            self.cap = cv2.VideoCapture(source, cv2.CAP_ANY)
+            if not self.cap.isOpened():
+                raise Exception(f"Failed to open camera {source}")
+                
+            # Try to read a test frame
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                raise Exception(f"Failed to read from camera {source}")
+                
+            self.current_camera = source
+            logger.info(f"Successfully initialized camera {source}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error initializing camera: {str(e)}")
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            return False
 
                                                     
