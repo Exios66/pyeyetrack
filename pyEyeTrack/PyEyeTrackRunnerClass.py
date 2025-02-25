@@ -166,10 +166,38 @@ class PyEyeTrackRunner:
         return max(0.0, quality_score)
 
     def create_session_directory(self, base_dir):
-        """Create a new session directory with timestamp."""
-        self.session_dir = os.path.join(base_dir, f"data")
+        """Create a new session directory with timestamp and proper organization."""
+        # Determine if this is a pilot or live session from metadata
+        session_type = self.metadata.get('session_type', 'live')  # Default to live if not specified
+        
+        # Create the full directory path
+        self.session_dir = os.path.join(
+            base_dir,
+            'data'
+        )
+        
+        # Set up data directories
         self.data_dir = os.path.join(self.session_dir, "raw_data")
-        os.makedirs(self.data_dir, exist_ok=True)
+        self.processed_dir = os.path.join(self.session_dir, "processed_data")
+        self.export_dir = os.path.join(base_dir, "exports")
+        self.log_dir = os.path.join(base_dir, "logs")
+        
+        # Create all necessary directories
+        for directory in [self.data_dir, self.processed_dir, self.export_dir, self.log_dir]:
+            os.makedirs(directory, exist_ok=True)
+        
+        # Initialize session log
+        log_file = os.path.join(self.log_dir, f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        with open(log_file, 'w') as f:
+            f.write(f"Session Type: {session_type}\n")
+            f.write(f"Participant ID: {self.participant_id}\n")
+            f.write(f"Session ID: {self.session_id}\n")
+            f.write(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
+        logger.info(f"Created session directory structure in {base_dir}")
+        logger.info(f"Session Type: {session_type}")
+        logger.info(f"Raw data will be saved to: {self.data_dir}")
+        
         return self.session_dir
 
     def add_marker(self, marker_text=None):

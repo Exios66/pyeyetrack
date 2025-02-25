@@ -12,7 +12,15 @@ from pyEyeTrack.EyeTracking.PupilTrackingClass import PupilTracking
 
 def get_session_metadata():
     """Collect detailed session metadata"""
+    # First determine if this is a pilot or live session
+    while True:
+        session_type = input("\nIs this a pilot test session? (yes/no): ").strip().lower()
+        if session_type in ['yes', 'no']:
+            break
+        print("Please enter 'yes' or 'no'")
+    
     metadata = {
+        'session_type': 'pilot' if session_type == 'yes' else 'live',
         'participant': {
             'id': input("Please enter participant ID: ").strip(),
             'age': input("Participant age (optional, press Enter to skip): ").strip() or None,
@@ -53,14 +61,27 @@ def validate_metadata(metadata):
 def setup_session_directory(metadata):
     """Create and setup session directory structure"""
     base_dir = "Output"
+    
+    # Create pilot or live data subdirectory
+    data_type_dir = "pilot_data" if metadata['session_type'] == 'pilot' else "live_data"
+    
     session_dir = os.path.join(
         base_dir,
+        data_type_dir,
         f"participant_{metadata['participant']['id']}",
         f"session_{metadata['session']['id']}"
     )
     
-    # Create directory structure
-    subdirs = ['data', 'metadata', 'analysis']
+    # Create directory structure with more detailed organization
+    subdirs = [
+        'data/raw_data',          # Raw eye tracking data
+        'data/processed_data',    # Processed/analyzed data
+        'metadata',               # Session metadata
+        'analysis',               # Analysis results
+        'logs',                   # Session logs
+        'exports'                 # Exported visualizations/reports
+    ]
+    
     for subdir in subdirs:
         os.makedirs(os.path.join(session_dir, subdir), exist_ok=True)
     
@@ -68,6 +89,14 @@ def setup_session_directory(metadata):
     metadata_file = os.path.join(session_dir, 'metadata', 'session_metadata.json')
     with open(metadata_file, 'w') as f:
         json.dump(metadata, f, indent=4)
+    
+    # Create a session log file
+    log_file = os.path.join(session_dir, 'logs', 'session.log')
+    with open(log_file, 'w') as f:
+        f.write(f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Session type: {metadata['session_type']}\n")
+        f.write(f"Participant ID: {metadata['participant']['id']}\n")
+        f.write(f"Session ID: {metadata['session']['id']}\n")
     
     return session_dir
 
