@@ -408,7 +408,7 @@ class TestPyEyeTrackAudioVideo(TestPyEyeTrackBase):
     
     def setUp(self):
         """Set up each test"""
-        self.video_recorder = VideoRecorder(file_name="test_video")
+        self.video_recorder = AudioRecorder(file_name="test_video")
         if AUDIO_AVAILABLE:
             self.audio_recorder = AudioRecorder(file_name="test_audio")
 
