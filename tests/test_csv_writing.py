@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 import stat
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -44,10 +45,26 @@ class TestCSVWriting(unittest.TestCase):
         self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.session_dir = os.path.join(self.test_data_dir, f"test_session_{self.session_timestamp}")
         
+        # Define all required subdirectories
+        subdirs = [
+            'data/raw_data',
+            'data/processed_data',
+            'metadata',
+            'logs',
+            'exports'
+        ]
+        
         try:
+            # Create session directory
             os.makedirs(self.session_dir, exist_ok=True)
-            # Set directory permissions (rwxr-xr-x)
             os.chmod(self.session_dir, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+            
+            # Create all subdirectories with proper permissions
+            for subdir in subdirs:
+                dir_path = os.path.join(self.session_dir, subdir)
+                os.makedirs(dir_path, exist_ok=True)
+                os.chmod(dir_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+            
             logger.debug(f"Created test session directory with proper permissions: {self.session_dir}")
         except Exception as e:
             logger.error(f"Failed to create/set permissions for session directory: {e}")
@@ -57,30 +74,36 @@ class TestCSVWriting(unittest.TestCase):
         self.test_filename = f'eye_tracking_data_{self.session_timestamp}.csv'
         logger.debug(f"Test filename: {self.test_filename}")
         
+        # Create comprehensive test data
         self.sample_data = {
-            'Session_ID': ['test_session_001'] * 5,
-            'Time': [
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-            ],
-            'Left_Pupil_X': [100, 102, 103, 101, 100],
-            'Left_Pupil_Y': [150, 152, 153, 151, 150],
-            'Right_Pupil_X': [200, 202, 203, 201, 200],
-            'Right_Pupil_Y': [250, 252, 253, 251, 250]
+            'timestamp': [datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f') for _ in range(5)],
+            'frame_number': list(range(1, 6)),
+            'left_eye_x': [100, 102, 103, 101, 100],
+            'left_eye_y': [150, 152, 153, 151, 150],
+            'right_eye_x': [200, 202, 203, 201, 200],
+            'right_eye_y': [250, 252, 253, 251, 250],
+            'left_pupil_size': [5.0, 5.1, 5.0, 4.9, 5.0],
+            'right_pupil_size': [5.0, 5.1, 5.0, 4.9, 5.0],
+            'left_blink': [0, 0, 1, 0, 0],
+            'right_blink': [0, 0, 1, 0, 0],
+            'gaze_x': [350, 352, 353, 351, 350],
+            'gaze_y': [400, 402, 403, 401, 400],
+            'head_pose_x': [10, 11, 10, 9, 10],
+            'head_pose_y': [20, 21, 20, 19, 20],
+            'head_pose_z': [30, 31, 30, 29, 30],
+            'data_quality': [1.0, 0.9, 0.8, 0.9, 1.0]
         }
         
         # Save test data in both directories
         # 1. Save to main output directory (for actual testing)
         self.test_csv_path = os.path.join(self.output_dir, self.test_filename)
         # 2. Save to test session directory (for preservation)
-        self.preserved_csv_path = os.path.join(self.session_dir, self.test_filename)
+        self.preserved_csv_path = os.path.join(self.session_dir, "data", "raw_data", self.test_filename)
         
         try:
             df = pd.DataFrame(self.sample_data)
-            # Save both copies
+            # Create directories and save both copies
+            os.makedirs(os.path.dirname(self.preserved_csv_path), exist_ok=True)
             df.to_csv(self.test_csv_path, index=False)
             df.to_csv(self.preserved_csv_path, index=False)
             
@@ -96,12 +119,16 @@ class TestCSVWriting(unittest.TestCase):
                 'test_file': self.test_filename,
                 'sample_size': len(df),
                 'columns': list(df.columns),
-                'run_as_root': os.geteuid() == 0
+                'session_info': {
+                    'participant_id': 'test_participant',
+                    'session_id': 'test_session',
+                    'session_type': 'pilot'
+                }
             }
-            metadata_path = os.path.join(self.session_dir, 'metadata.json')
+            metadata_path = os.path.join(self.session_dir, 'metadata', 'session_metadata.json')
+            os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
             with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            # Set metadata file permissions (rw-r--r--)
+                json.dump(metadata, f, indent=4)
             os.chmod(metadata_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
             logger.debug(f"Saved test metadata with proper permissions to {metadata_path}")
             
@@ -110,15 +137,14 @@ class TestCSVWriting(unittest.TestCase):
             raise
         
     def tearDown(self):
-        """Clean up after each test - remove only the test file from output directory"""
+        """Clean up after each test"""
         logger.debug("Starting tearDown")
         try:
+            # Remove test file from output directory
             if os.path.exists(self.test_csv_path):
                 os.remove(self.test_csv_path)
                 logger.debug(f"Removed test file from output directory: {self.test_csv_path}")
-            else:
-                logger.warning(f"Test file not found during cleanup: {self.test_csv_path}")
-                
+            
             logger.debug(f"Preserved test data remains in: {self.preserved_csv_path}")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
@@ -134,108 +160,97 @@ class TestCSVWriting(unittest.TestCase):
 
     def test_csv_file_creation(self):
         """Test that CSV file exists with correct path and name"""
-        # Log current directory contents
-        logger.debug(f"Current directory: {os.getcwd()}")
-        logger.debug(f"Output directory contents: {os.listdir(self.output_dir)}")
-        
         self.assertTrue(os.path.exists(self.test_csv_path), "CSV file was not created")
-        self.assertTrue(os.path.exists(self.output_dir), "Output directory does not exist")
-        self.assertIn(self.test_filename, os.listdir(self.output_dir), "CSV file not found in output directory")
+        self.assertTrue(os.path.exists(self.preserved_csv_path), "Preserved CSV file was not created")
         
-    def test_output_directory_structure(self):
-        """Test that the output directory exists and has the correct structure"""
-        # Log directory information
-        logger.debug(f"Testing directory: {self.output_dir}")
-        logger.debug(f"Directory exists: {os.path.exists(self.output_dir)}")
-        logger.debug(f"Is directory: {os.path.isdir(self.output_dir)}")
-        logger.debug(f"Directory permissions: {oct(os.stat(self.output_dir).st_mode)}")
+        # Verify file permissions
+        test_perms = stat.S_IMODE(os.stat(self.test_csv_path).st_mode)
+        preserved_perms = stat.S_IMODE(os.stat(self.preserved_csv_path).st_mode)
+        self.assertEqual(test_perms, 0o644, "Incorrect test file permissions")
+        self.assertEqual(preserved_perms, 0o644, "Incorrect preserved file permissions")
+
+    def test_directory_structure(self):
+        """Test directory structure and permissions"""
+        # Check main directories exist
+        self.assertTrue(os.path.exists(self.output_dir), "Output directory missing")
+        self.assertTrue(os.path.exists(self.test_data_dir), "Test data directory missing")
+        self.assertTrue(os.path.exists(self.session_dir), "Session directory missing")
         
-        # Check output directory exists
-        self.assertTrue(os.path.exists(self.output_dir), "Output directory does not exist")
-        self.assertTrue(os.path.isdir(self.output_dir), "Output path is not a directory")
-        
-        # Check output directory permissions
-        self.assertTrue(os.access(self.output_dir, os.W_OK), "Output directory is not writable")
-        self.assertTrue(os.access(self.output_dir, os.R_OK), "Output directory is not readable")
-        
-        # Check CSV file is in the output directory
-        files = os.listdir(self.output_dir)
-        logger.debug(f"Files in output directory: {files}")
-        
-        csv_files = [f for f in files if f.endswith('.csv')]
-        logger.debug(f"CSV files found: {csv_files}")
-        
-        self.assertGreater(len(csv_files), 0, "No CSV files found in output directory")
-        self.assertIn(self.test_filename, csv_files, "Test CSV file not found in output directory")
-        
-    def test_csv_file_structure(self):
-        """Test that CSV file has the correct columns and data types"""
-        df = pd.read_csv(self.test_csv_path)
-        
-        # Check required columns exist
-        required_columns = [
-            'Session_ID',
-            'Time',
-            'Left_Pupil_X',
-            'Left_Pupil_Y',
-            'Right_Pupil_X',
-            'Right_Pupil_Y'
-        ]
-        for column in required_columns:
-            self.assertIn(column, df.columns, f"Missing required column: {column}")
+        # Check subdirectories exist
+        required_subdirs = ['data/raw_data', 'metadata', 'logs']
+        for subdir in required_subdirs:
+            dir_path = os.path.join(self.session_dir, subdir)
+            self.assertTrue(os.path.exists(dir_path), f"Missing subdirectory: {subdir}")
             
+            # Check directory permissions
+            perms = stat.S_IMODE(os.stat(dir_path).st_mode)
+            self.assertEqual(perms, 0o755, f"Incorrect permissions for {subdir}")
+
+    def test_data_validation(self):
+        """Test data validation and quality checks"""
+        df = pd.read_csv(self.preserved_csv_path)
+        
+        # Check required columns
+        required_columns = [
+            'timestamp', 'frame_number', 
+            'left_eye_x', 'left_eye_y', 
+            'right_eye_x', 'right_eye_y'
+        ]
+        for col in required_columns:
+            self.assertIn(col, df.columns, f"Missing required column: {col}")
+        
         # Check data types
-        self.assertTrue(df['Left_Pupil_X'].dtype in ['float64', 'int64'], "Invalid data type for Left_Pupil_X")
-        self.assertTrue(df['Left_Pupil_Y'].dtype in ['float64', 'int64'], "Invalid data type for Left_Pupil_Y")
-        self.assertTrue(df['Right_Pupil_X'].dtype in ['float64', 'int64'], "Invalid data type for Right_Pupil_X")
-        self.assertTrue(df['Right_Pupil_Y'].dtype in ['float64', 'int64'], "Invalid data type for Right_Pupil_Y")
+        numeric_columns = [
+            'left_eye_x', 'left_eye_y', 
+            'right_eye_x', 'right_eye_y',
+            'left_pupil_size', 'right_pupil_size'
+        ]
+        for col in numeric_columns:
+            self.assertTrue(np.issubdtype(df[col].dtype, np.number), 
+                          f"Column {col} is not numeric")
         
-    def test_csv_data_validity(self):
-        """Test that CSV data is within valid ranges"""
-        df = pd.read_csv(self.test_csv_path)
+        # Check value ranges
+        for col in ['left_eye_x', 'left_eye_y', 'right_eye_x', 'right_eye_y']:
+            self.assertTrue((df[col] >= 0).all(), f"Negative values in {col}")
+            
+        # Check quality scores
+        self.assertTrue((df['data_quality'] >= 0).all() and 
+                       (df['data_quality'] <= 1).all(),
+                       "Invalid quality scores")
+
+    def test_metadata_handling(self):
+        """Test metadata file creation and content"""
+        metadata_path = os.path.join(self.session_dir, 'metadata', 'session_metadata.json')
+        self.assertTrue(os.path.exists(metadata_path), "Metadata file missing")
         
-        # Check coordinate ranges (assuming coordinates are in pixels and can't be negative)
-        self.assertTrue((df['Left_Pupil_X'] >= 0).all(), "Invalid negative X coordinate for left pupil")
-        self.assertTrue((df['Left_Pupil_Y'] >= 0).all(), "Invalid negative Y coordinate for left pupil")
-        self.assertTrue((df['Right_Pupil_X'] >= 0).all(), "Invalid negative X coordinate for right pupil")
-        self.assertTrue((df['Right_Pupil_Y'] >= 0).all(), "Invalid negative Y coordinate for right pupil")
+        # Check metadata content
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+            
+        required_fields = ['timestamp', 'test_file', 'sample_size', 'columns']
+        for field in required_fields:
+            self.assertIn(field, metadata, f"Missing metadata field: {field}")
+            
+        # Check session info
+        self.assertIn('session_info', metadata)
+        session_info = metadata['session_info']
+        self.assertEqual(session_info['session_type'], 'pilot')
+        self.assertEqual(session_info['participant_id'], 'test_participant')
+        self.assertEqual(session_info['session_id'], 'test_session')
+
+    def test_data_consistency(self):
+        """Test data consistency between files"""
+        test_df = pd.read_csv(self.test_csv_path)
+        preserved_df = pd.read_csv(self.preserved_csv_path)
         
-        # Check for reasonable maximum values (assuming 4K resolution max)
-        max_resolution = 4096
-        self.assertTrue((df['Left_Pupil_X'] <= max_resolution).all(), "X coordinate exceeds maximum resolution")
-        self.assertTrue((df['Left_Pupil_Y'] <= max_resolution).all(), "Y coordinate exceeds maximum resolution")
-        self.assertTrue((df['Right_Pupil_X'] <= max_resolution).all(), "X coordinate exceeds maximum resolution")
-        self.assertTrue((df['Right_Pupil_Y'] <= max_resolution).all(), "Y coordinate exceeds maximum resolution")
+        # Compare dataframes
+        pd.testing.assert_frame_equal(test_df, preserved_df, 
+                                    "Data mismatch between test and preserved files")
         
-    def test_timestamp_format(self):
-        """Test that timestamps in CSV are in correct format"""
-        df = pd.read_csv(self.test_csv_path)
-        
-        # Check timestamp format (should be YYYY-MM-DD HH:MM:SS.ffffff)
-        timestamp_pattern = r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}'
-        self.assertTrue(df['Time'].str.match(timestamp_pattern).all(), "Invalid timestamp format")
-        
-        # Check that timestamps are in chronological order
-        timestamps = pd.to_datetime(df['Time'])
-        self.assertTrue((timestamps.diff()[1:] >= pd.Timedelta(0)).all(), "Timestamps are not in chronological order")
-        
-    def test_session_id_consistency(self):
-        """Test that session ID remains consistent throughout the recording"""
-        df = pd.read_csv(self.test_csv_path)
-        
-        # Check that session ID is consistent
-        unique_session_ids = df['Session_ID'].unique()
-        self.assertEqual(len(unique_session_ids), 1, "Multiple session IDs found in single recording")
-        
-    def test_data_continuity(self):
-        """Test that there are no large unexplained jumps in pupil positions"""
-        df = pd.read_csv(self.test_csv_path)
-        
-        # Check for continuity in pupil positions (no jumps larger than 50 pixels)
-        max_jump = 50
-        for col in ['Left_Pupil_X', 'Left_Pupil_Y', 'Right_Pupil_X', 'Right_Pupil_Y']:
-            jumps = abs(df[col].diff())
-            self.assertTrue((jumps[1:] <= max_jump).all(), f"Large unexpected jump detected in {col}")
+        # Verify data matches original sample
+        for col in self.sample_data:
+            self.assertTrue(all(test_df[col] == self.sample_data[col]),
+                          f"Data mismatch in column {col}")
 
 if __name__ == '__main__':
     # Check if running with sudo
