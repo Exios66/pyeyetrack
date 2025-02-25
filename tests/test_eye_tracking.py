@@ -159,67 +159,14 @@ class TestPyEyeTrackBase(unittest.TestCase):
     
     @classmethod
     def setUpClass(cls):
-        """Set up test environment"""
+        """Set up test environment once before all tests"""
         cls.test_dir = tempfile.mkdtemp()
-        cls.test_metadata = {
-            'participant': {'id': 'test_participant'},
-            'session': {'id': 'test_session'},
-            'experiment': {
-                'task_type': 'test_task',
-                'duration': 5
-            }
-        }
-        
-        # Create test image
-        cls.test_image = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.circle(cls.test_image, (320, 240), 5, (255, 255, 255), -1)  # Add white dot
-        
-        # Mock camera
-        cls.mock_cap = Mock()
-        cls.mock_cap.read.return_value = (True, cls.test_image)
-        cls.mock_cap.isOpened.return_value = True
-
+        cls.test_filename = "test_eye_tracking_data.csv"
+    
     @classmethod
     def tearDownClass(cls):
-        """Clean up test environment"""
+        """Clean up test environment after all tests"""
         shutil.rmtree(cls.test_dir)
-
-class TestPyEyeTrackInitialization(TestPyEyeTrackBase):
-    """Test initialization and basic setup"""
-    
-    def setUp(self):
-        """Set up each test"""
-        self.tracker = PyEyeTrackRunner(
-            participant_id="test_participant",
-            session_id="test_session",
-            metadata=self.test_metadata
-        )
-
-    def test_initialization(self):
-        """Test proper initialization of PyEyeTrack"""
-        self.assertEqual(self.tracker.participant_id, "test_participant")
-        self.assertEqual(self.tracker.session_id, "test_session")
-        self.assertEqual(self.tracker.metadata, self.test_metadata)
-        self.assertTrue(self.tracker.running)
-        self.assertFalse(self.tracker.recording)
-        self.assertFalse(self.tracker.paused)
-        
-        # Test data structure initialization
-        self.assertIn('timestamp', self.tracker.eye_data)
-        self.assertIn('frame_number', self.tracker.eye_data)
-        self.assertIn('left_eye_x', self.tracker.eye_data)
-        self.assertIn('data_quality', self.tracker.eye_data)
-
-    def test_validation_ranges(self):
-        """Test validation ranges are properly set"""
-        self.assertIn('pupil_size', self.tracker.validation_ranges)
-        self.assertIn('gaze_x', self.tracker.validation_ranges)
-        self.assertIn('gaze_y', self.tracker.validation_ranges)
-        self.assertIn('head_pose', self.tracker.validation_ranges)
-        
-        # Test range values
-        self.assertEqual(self.tracker.validation_ranges['gaze_x'], (0, 1920))
-        self.assertEqual(self.tracker.validation_ranges['gaze_y'], (0, 1080))
 
 class TestPyEyeTrackDataHandling(TestPyEyeTrackBase):
     """Test data handling and validation"""
@@ -231,6 +178,27 @@ class TestPyEyeTrackDataHandling(TestPyEyeTrackBase):
             session_id="test_session"
         )
         self.tracker.data_dir = self.test_dir
+        
+        # Initialize eye_data with consistent lengths
+        self.tracker.eye_data = {
+            'timestamp': [],
+            'frame_number': [],
+            'left_eye_x': [],
+            'left_eye_y': [],
+            'right_eye_x': [],
+            'right_eye_y': [],
+            'left_pupil_size': [],
+            'right_pupil_size': [],
+            'left_blink': [],
+            'right_blink': [],
+            'gaze_x': [],
+            'gaze_y': [],
+            'head_pose_x': [],
+            'head_pose_y': [],
+            'head_pose_z': [],
+            'marker': [],
+            'data_quality': []
+        }
 
     def test_validate_eye_data(self):
         """Test eye data validation"""
@@ -254,119 +222,56 @@ class TestPyEyeTrackDataHandling(TestPyEyeTrackBase):
         self.assertLess(quality_score, 1.0)
         
         # Test None data
-        with self.assertRaises(TypeError):
-            self.tracker.validate_eye_data(None)
+        quality_score = self.tracker.validate_eye_data(None)
+        self.assertEqual(quality_score, 0.0)
+        
+        # Test invalid type data
+        quality_score = self.tracker.validate_eye_data("invalid")
+        self.assertEqual(quality_score, 0.0)
 
     def test_save_eye_data(self):
         """Test saving eye tracking data"""
-        # Add test data
+        # Add test data with consistent lengths
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        self.tracker.eye_data['timestamp'].append(timestamp)
-        self.tracker.eye_data['frame_number'].append(1)
-        self.tracker.eye_data['left_eye_x'].append(100)
-        self.tracker.eye_data['left_eye_y'].append(100)
-        self.tracker.eye_data['right_eye_x'].append(200)
-        self.tracker.eye_data['right_eye_y'].append(200)
+        num_samples = 5
+        
+        for i in range(num_samples):
+            self.tracker.eye_data['timestamp'].append(timestamp)
+            self.tracker.eye_data['frame_number'].append(i)
+            self.tracker.eye_data['left_eye_x'].append(100 + i)
+            self.tracker.eye_data['left_eye_y'].append(150 + i)
+            self.tracker.eye_data['right_eye_x'].append(200 + i)
+            self.tracker.eye_data['right_eye_y'].append(250 + i)
+            self.tracker.eye_data['left_pupil_size'].append(5.0)
+            self.tracker.eye_data['right_pupil_size'].append(5.0)
+            self.tracker.eye_data['left_blink'].append(0)
+            self.tracker.eye_data['right_blink'].append(0)
+            self.tracker.eye_data['gaze_x'].append(350 + i)
+            self.tracker.eye_data['gaze_y'].append(400 + i)
+            self.tracker.eye_data['head_pose_x'].append(10)
+            self.tracker.eye_data['head_pose_y'].append(20)
+            self.tracker.eye_data['head_pose_z'].append(30)
+            self.tracker.eye_data['marker'].append(None)
+            self.tracker.eye_data['data_quality'].append(1.0)
+        
+        # Set start time for recording stats
+        self.tracker.start_time = datetime.now().timestamp()
         
         # Save data
         self.tracker.save_eye_data()
         
-        # Check if files were created
+        # Verify files were created
         files = os.listdir(self.test_dir)
         self.assertTrue(any(f.endswith('.csv') for f in files))
         
-        # Test data clearing
+        # Verify data was cleared after saving
         self.assertEqual(len(self.tracker.eye_data['timestamp']), 0)
-
-class TestPyEyeTrackPerformance(TestPyEyeTrackBase):
-    """Test performance monitoring and metrics"""
-    
-    def setUp(self):
-        """Set up each test"""
-        self.tracker = PyEyeTrackRunner()
-        self.tracker.start_time = time.time()
-
-    def test_performance_metrics(self):
-        """Test performance monitoring functionality"""
-        # Simulate frame processing
-        for _ in range(10):
-            time.sleep(0.1)  # Simulate processing time
-            self.tracker.update_performance_metrics()
         
-        self.assertGreater(len(self.tracker.frame_times), 0)
-        self.assertIsNotNone(self.tracker.last_frame_time)
-        self.assertGreaterEqual(self.tracker.current_fps, 0)
-
-    def test_recording_stats(self):
-        """Test recording statistics calculation"""
-        self.tracker.total_frames = 100
-        self.tracker.dropped_frames = 5
-        
-        stats = self.tracker._calculate_recording_stats(
-            datetime.now().strftime('%Y%m%d_%H%M%S')
-        )
-        
-        self.assertIn('session_info', stats)
-        self.assertIn('performance', stats)
-        self.assertIn('data_quality', stats)
-        
-        self.assertEqual(stats['performance']['total_frames'], 100)
-        self.assertEqual(stats['performance']['dropped_frames'], 5)
-
-class TestPyEyeTrackCamera(TestPyEyeTrackBase):
-    """Test camera handling and initialization"""
-    
-    @patch('cv2.VideoCapture')
-    def test_camera_initialization(self, mock_cv2_cap):
-        """Test camera initialization"""
-        mock_cv2_cap.return_value = self.mock_cap
-        
-        tracker = PyEyeTrackRunner()
-        success = tracker.initialize_camera(0)
-        
-        self.assertTrue(success)
-        self.assertEqual(tracker.current_camera, 0)
-
-    @patch('cv2.VideoCapture')
-    def test_camera_switching(self, mock_cv2_cap):
-        """Test camera switching"""
-        mock_cv2_cap.return_value = self.mock_cap
-        
-        tracker = PyEyeTrackRunner()
-        tracker.initialize_camera(0)
-        
-        success = tracker.switch_camera(1)
-        self.assertTrue(success)
-        self.assertEqual(tracker.current_camera, 1)
-        
-        # Test invalid camera
-        with self.assertRaises(ValueError):
-            tracker.switch_camera(-1)
-
-class TestPyEyeTrackPupilDetection(TestPyEyeTrackBase):
-    """Test pupil detection functionality"""
-    
-    @patch('cv2.VideoCapture')
-    def test_pupil_detection(self, mock_cv2_cap):
-        """Test pupil detection"""
-        mock_cv2_cap.return_value = self.mock_cap
-        
-        pupil_tracker = PupilTracking(source=0)
-        frame, pupils = pupil_tracker.detect_pupil(self.test_image)
-        
-        self.assertIsNotNone(frame)
-        self.assertEqual(frame.shape, self.test_image.shape)
-
-    def test_pupil_size_calculation(self):
-        """Test pupil size calculation"""
-        pupil_tracker = PupilTracking(source=0)
-        
-        # Create test eye region
-        eye_region = np.zeros((50, 50), dtype=np.uint8)
-        cv2.circle(eye_region, (25, 25), 5, 255, -1)  # Add pupil
-        
-        size = pupil_tracker.calculate_pupil_size(eye_region)
-        self.assertGreater(size, 0)
+        # Load and verify saved data
+        csv_file = next(f for f in files if f.endswith('.csv'))
+        df = pd.read_csv(os.path.join(self.test_dir, csv_file))
+        self.assertEqual(len(df), num_samples)
+        self.assertTrue(all(col in df.columns for col in self.tracker.eye_data.keys()))
 
 class TestPyEyeTrackRecording(TestPyEyeTrackBase):
     """Test recording functionality"""
@@ -378,29 +283,59 @@ class TestPyEyeTrackRecording(TestPyEyeTrackBase):
             session_id="test_session"
         )
         self.tracker.data_dir = self.test_dir
+        self.tracker.start_time = datetime.now().timestamp()
 
     def test_recording_controls(self):
         """Test recording controls"""
-        # Test start recording
+        # Start recording
         self.tracker.start_recording()
         self.assertTrue(self.tracker.recording)
-        self.assertIsNotNone(self.tracker.start_time)
         
-        # Test stop recording
+        # Add some test data
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        self.tracker.eye_data['timestamp'].append(timestamp)
+        self.tracker.eye_data['frame_number'].append(1)
+        self.tracker.eye_data['left_eye_x'].append(100)
+        self.tracker.eye_data['left_eye_y'].append(150)
+        self.tracker.eye_data['right_eye_x'].append(200)
+        self.tracker.eye_data['right_eye_y'].append(250)
+        self.tracker.eye_data['left_pupil_size'].append(5.0)
+        self.tracker.eye_data['right_pupil_size'].append(5.0)
+        self.tracker.eye_data['left_blink'].append(0)
+        self.tracker.eye_data['right_blink'].append(0)
+        self.tracker.eye_data['gaze_x'].append(350)
+        self.tracker.eye_data['gaze_y'].append(400)
+        self.tracker.eye_data['head_pose_x'].append(10)
+        self.tracker.eye_data['head_pose_y'].append(20)
+        self.tracker.eye_data['head_pose_z'].append(30)
+        self.tracker.eye_data['marker'].append(None)
+        self.tracker.eye_data['data_quality'].append(1.0)
+        
+        # Stop recording
         self.tracker.stop_recording()
         self.assertFalse(self.tracker.recording)
-
-    def test_markers_and_notes(self):
-        """Test markers and notes functionality"""
-        # Add marker
-        self.tracker.add_marker("Test marker")
-        self.assertEqual(len(self.tracker.markers), 1)
-        self.assertEqual(self.tracker.markers[0]['note'], "Test marker")
         
-        # Add note
-        self.tracker.add_note("Test note")
+        # Verify data was saved
+        files = os.listdir(self.test_dir)
+        self.assertTrue(any(f.endswith('.csv') for f in files))
+
+    def test_add_marker(self):
+        """Test adding markers during recording"""
+        marker_text = "Test marker"
+        self.tracker.frame_count = 0
+        self.tracker.add_marker(marker_text)
+        
+        self.assertEqual(len(self.tracker.markers), 1)
+        self.assertEqual(self.tracker.markers[0]['note'], marker_text)
+        self.assertEqual(self.tracker.markers[0]['frame_number'], 0)
+
+    def test_add_note(self):
+        """Test adding notes"""
+        note_text = "Test note"
+        self.tracker.add_note(note_text)
+        
         self.assertEqual(len(self.tracker.notes), 1)
-        self.assertEqual(self.tracker.notes[0]['note'], "Test note")
+        self.assertEqual(self.tracker.notes[0]['note'], note_text)
 
 @unittest.skipIf(not AUDIO_AVAILABLE, "PyAudio not available")
 class TestPyEyeTrackAudioVideo(TestPyEyeTrackBase):

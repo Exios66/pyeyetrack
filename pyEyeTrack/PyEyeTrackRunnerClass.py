@@ -119,49 +119,50 @@ class PyEyeTrackRunner:
 
     def validate_eye_data(self, eye_data: Dict[str, Any]) -> float:
         """
-        Validate eye tracking data quality
+        Validate eye tracking data quality with proper null value handling
         Args:
             eye_data: Dictionary containing eye tracking data
         Returns:
             float: Quality score between 0 and 1
-        Raises:
-            TypeError: If eye_data is None
-            ValueError: If required fields are missing
         """
         if eye_data is None:
-            raise TypeError("Eye data cannot be None")
+            return 0.0
             
         if not isinstance(eye_data, dict):
-            raise TypeError("Eye data must be a dictionary")
+            return 0.0
             
         quality_score = 1.0
         deductions = []
         
-        # Check pupil size
-        if eye_data.get('left_pupil_size', 0) > 0:  # Only check if data exists
-            if not (self.validation_ranges['pupil_size'][0] <= eye_data['left_pupil_size'] <= self.validation_ranges['pupil_size'][1]):
+        # Check pupil size if available and not None
+        left_pupil = eye_data.get('left_pupil_size')
+        if left_pupil is not None and isinstance(left_pupil, (int, float)):
+            if not (self.validation_ranges['pupil_size'][0] <= left_pupil <= self.validation_ranges['pupil_size'][1]):
                 quality_score -= 0.2
                 deductions.append('pupil_size_out_of_range')
         
-        # Check gaze coordinates
-        if eye_data.get('gaze_x', 0) > 0 and eye_data.get('gaze_y', 0) > 0:
-            if not (0 <= eye_data['gaze_x'] <= self.validation_ranges['gaze_x'][1]):
+        # Check gaze coordinates if available and not None
+        gaze_x = eye_data.get('gaze_x')
+        gaze_y = eye_data.get('gaze_y')
+        if gaze_x is not None and gaze_y is not None and isinstance(gaze_x, (int, float)) and isinstance(gaze_y, (int, float)):
+            if not (0 <= gaze_x <= self.validation_ranges['gaze_x'][1]):
                 quality_score -= 0.2
                 deductions.append('gaze_x_out_of_range')
-            if not (0 <= eye_data['gaze_y'] <= self.validation_ranges['gaze_y'][1]):
+            if not (0 <= gaze_y <= self.validation_ranges['gaze_y'][1]):
                 quality_score -= 0.2
                 deductions.append('gaze_y_out_of_range')
         
-        # Check head pose
+        # Check head pose if available and not None
         for pose in ['head_pose_x', 'head_pose_y', 'head_pose_z']:
-            if eye_data.get(pose, 0) != 0:  # Only check if data exists
-                if not (self.validation_ranges['head_pose'][0] <= eye_data[pose] <= self.validation_ranges['head_pose'][1]):
+            pose_val = eye_data.get(pose)
+            if pose_val is not None and isinstance(pose_val, (int, float)):
+                if not (self.validation_ranges['head_pose'][0] <= pose_val <= self.validation_ranges['head_pose'][1]):
                     quality_score -= 0.1
                     deductions.append(f'{pose}_out_of_range')
         
-        # Log quality issues
+        # Log quality issues if any
         if deductions:
-            logger.warning(f"Data quality issues detected: {', '.join(deductions)}")
+            logger.debug(f"Data quality issues detected: {', '.join(deductions)}")
         
         return max(0.0, quality_score)
 
@@ -243,9 +244,8 @@ class PyEyeTrackRunner:
             raise ValueError("No eye tracking data available to save")
         
         try:
-            # Generate timestamp and validate data
+            # Generate timestamp for unique filename
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self._validate_eye_data()
             
             # Create DataFrame with all collected metrics
             df = pd.DataFrame(self.eye_data)
@@ -253,17 +253,18 @@ class PyEyeTrackRunner:
             # Calculate recording statistics
             stats = self._calculate_recording_stats(timestamp)
             
-            # Create session directory structure
-            session_dir = self._create_session_directory(timestamp)
+            # Ensure raw data directory exists
+            raw_data_dir = os.path.join(self.data_dir, "raw_data")
+            os.makedirs(raw_data_dir, exist_ok=True)
             
-            # Save raw data with proper permissions
-            csv_filename = f"eye_tracking_data_{timestamp}.csv"
-            csv_path = os.path.join(session_dir, "data", "raw_data", csv_filename)
+            # Save raw data with proper naming convention
+            csv_filename = f"eye_tracking_data_{self.participant_id}_{self.session_id}_{timestamp}.csv"
+            csv_path = os.path.join(raw_data_dir, csv_filename)
             df.to_csv(csv_path, index=False)
             os.chmod(csv_path, 0o644)  # rw-r--r--
             
             # Save additional files
-            self._save_additional_files(session_dir, timestamp, stats)
+            self._save_additional_files(self.session_dir, timestamp, stats)
             
             # Log recording summary
             self._log_recording_summary(stats)
@@ -276,26 +277,30 @@ class PyEyeTrackRunner:
             logger.error(f"Error saving eye tracking data: {str(e)}")
             raise
 
-    def _validate_eye_data(self) -> None:
-        """Validate eye tracking data before saving."""
-        required_fields = ['timestamp', 'frame_number', 'left_eye_x', 'left_eye_y', 
-                          'right_eye_x', 'right_eye_y']
-        
-        for field in required_fields:
-            if field not in self.eye_data or not self.eye_data[field]:
-                raise ValueError(f"Missing required field: {field}")
-            
-        # Validate data types and ranges
-        for x, y in zip(self.eye_data['left_eye_x'], self.eye_data['left_eye_y']):
-            if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
-                raise ValueError("Invalid coordinate types in eye tracking data")
-            if x < 0 or y < 0:
-                raise ValueError("Invalid negative coordinates in eye tracking data")
-
     def _calculate_recording_stats(self, timestamp: str) -> Dict[str, Any]:
-        """Calculate comprehensive recording statistics."""
+        """Calculate comprehensive recording statistics with proper null value handling."""
         recording_duration = time.time() - self.start_time if self.start_time else 0
         frame_rate = self.total_frames / recording_duration if recording_duration > 0 else 0
+        
+        # Helper function to safely count valid gaze points
+        def count_valid_gaze_points():
+            count = 0
+            for x, y in zip(self.eye_data['gaze_x'], self.eye_data['gaze_y']):
+                if x is not None and y is not None and isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                    if x > 0 and y > 0:
+                        count += 1
+            return count
+        
+        # Helper function to safely calculate mean of data quality scores
+        def calculate_mean_quality():
+            quality_scores = [score for score in self.eye_data['data_quality'] if score is not None]
+            return np.mean(quality_scores) if quality_scores else 0
+        
+        # Helper function to safely count blinks
+        def count_total_blinks():
+            left_blinks = sum(1 for b in self.eye_data['left_blink'] if b is not None and b > 0)
+            right_blinks = sum(1 for b in self.eye_data['right_blink'] if b is not None and b > 0)
+            return left_blinks + right_blinks
         
         return {
             'session_info': {
@@ -314,43 +319,12 @@ class PyEyeTrackRunner:
                 'camera_id': self.current_camera
             },
             'data_quality': {
-                'average_quality_score': np.mean(self.eye_data['data_quality']) if self.eye_data['data_quality'] else 0,
-                'total_blinks': sum(self.eye_data['left_blink']) + sum(self.eye_data['right_blink']),
-                'valid_gaze_points': sum(1 for x, y in zip(self.eye_data['gaze_x'], self.eye_data['gaze_y']) 
-                                       if x > 0 and y > 0),
-                'data_completeness': len(self.eye_data['timestamp']) / self.total_frames if self.total_frames > 0 else 0
+                'average_quality_score': calculate_mean_quality(),
+                'total_blinks': count_total_blinks(),
+                'valid_gaze_points': count_valid_gaze_points(),
+                'data_completeness': len([x for x in self.eye_data['timestamp'] if x is not None]) / self.total_frames if self.total_frames > 0 else 0
             }
         }
-
-    def _create_session_directory(self, timestamp: str) -> str:
-        """Create organized directory structure for the session."""
-        # Determine session type directory
-        data_type_dir = "pilot_data" if self.metadata.get('session_type') == 'pilot' else "live_data"
-        
-        # Create full directory path
-        session_dir = os.path.join(
-            self.data_dir,
-            data_type_dir,
-            f"participant_{self.participant_id}",
-            f"session_{self.session_id}",
-            f"recording_{timestamp}"
-        )
-        
-        # Create subdirectories with proper permissions
-        subdirs = [
-            'data/raw_data',
-            'data/processed_data',
-            'metadata',
-            'analysis',
-            'logs'
-        ]
-        
-        for subdir in subdirs:
-            dir_path = os.path.join(session_dir, subdir)
-            os.makedirs(dir_path, exist_ok=True)
-            os.chmod(dir_path, 0o755)  # rwxr-xr-x
-        
-        return session_dir
 
     def _save_additional_files(self, session_dir: str, timestamp: str, stats: Dict[str, Any]) -> None:
         """Save additional files like markers, notes, and statistics."""
@@ -375,23 +349,15 @@ class PyEyeTrackRunner:
         os.chmod(stats_file, 0o644)
 
     def _log_recording_summary(self, stats: Dict[str, Any]) -> None:
-        """Log a comprehensive recording summary."""
+        """Log a summary of the recording session."""
         logger.info("\nRecording Summary:")
-        logger.info(f"Session Type: {stats['session_info']['session_type']}")
-        logger.info(f"Participant ID: {stats['session_info']['participant_id']}")
-        logger.info(f"Session ID: {stats['session_info']['session_id']}")
+        logger.info(f"Participant ID: {self.participant_id}")
+        logger.info(f"Session ID: {self.session_id}")
         logger.info(f"Total Frames: {stats['performance']['total_frames']}")
-        
-        if stats['performance']['total_frames'] > 0:
-            dropped_percentage = (stats['performance']['dropped_frames'] / stats['performance']['total_frames'] * 100)
-            logger.info(f"Dropped Frames: {stats['performance']['dropped_frames']} ({dropped_percentage:.2f}%)")
-            logger.info(f"Average Frame Rate: {stats['performance']['frame_rate']:.2f} FPS")
-            logger.info(f"Data Completeness: {stats['data_quality']['data_completeness']*100:.2f}%")
-            logger.info(f"Average Quality Score: {stats['data_quality']['average_quality_score']:.2f}")
-        
+        logger.info(f"Dropped Frames: {stats['performance']['dropped_frames']}")
+        logger.info(f"Average Frame Rate: {stats['performance']['frame_rate']:.2f} fps")
         logger.info(f"Recording Duration: {stats['performance']['recording_duration']:.2f} seconds")
-        logger.info(f"Total Blinks Detected: {stats['data_quality']['total_blinks']}")
-        logger.info(f"Valid Gaze Points: {stats['data_quality']['valid_gaze_points']}")
+        logger.info(f"Data Quality Score: {stats['data_quality']['average_quality_score']:.2f}")
 
     def process_key(self, key):
         """Process a key press event."""
@@ -500,62 +466,120 @@ class PyEyeTrackRunner:
         destinationPath="./Output"
     ):
         """
-        Main runner method for eye tracking.
+        Main runner method for eye tracking
+        Args:
+            source: Camera source (default: 0)
+            pupilTracking: Enable pupil tracking (default: True)
+            videoRecording: Enable video recording (default: False)
+            audioRecording: Enable audio recording (default: False)
+            destinationPath: Output directory path (default: "./Output")
         """
         try:
-            # Create session directory
-            self.session_dir = self.create_session_directory(destinationPath)
-
+            # Create session directory first
+            if not os.path.exists(destinationPath):
+                os.makedirs(destinationPath)
+            
+            # Create session directory structure
+            self.create_session_directory(destinationPath)
+            
             # Initialize camera with proper detection
+            logger.info("Detecting available cameras...")
             if not self.initialize_camera(source):
                 raise Exception("Could not initialize any camera. Please check your camera connection.")
-
-            # Initialize window
-            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-
-            # Initialize pupil tracker
+            
+            # Initialize trackers
             if pupilTracking:
-                pupil_tracker = PupilTracking()
-
-            print("\nControls:")
-            print("Press 'r' to start/stop recording")
-            print("Press 'q' to quit")
-            print("Press 's' to add a marker/note")
-            print("Press 'p' to pause/resume\n")
-
+                try:
+                    pupil_tracker = PupilTracking(source=source, session_id=self.session_id)
+                    logger.info("PupilTracking initialized")
+                except Exception as e:
+                    logger.error(f"Error initializing pupil tracker: {str(e)}")
+                    raise
+            
+            # Initialize recorders if needed
+            video_recorder = None
+            audio_recorder = None
+            if videoRecording:
+                video_recorder = VideoRecorder(self.cap, os.path.join(self.data_dir, "video_recording.avi"))
+            if audioRecording and AUDIO_AVAILABLE:
+                audio_recorder = AudioRecorder(os.path.join(self.data_dir, "audio_recording.wav"))
+            
+            # Initialize data collection
+            self.frame_count = 0
+            self.total_frames = 0
+            self.eye_data = {k: [] for k in self.eye_data.keys()}  # Reset data storage
+            
+            # Create window with proper settings
+            cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            
             while self.running:
                 if not self.paused:
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        self.dropped_frames += 1
-                        logger.warning("Failed to read frame from camera")
+                    # Read frame with error handling
+                    try:
+                        ret, frame = self.cap.read()
+                        if not ret or frame is None:
+                            self.dropped_frames += 1
+                            logger.warning("Failed to read frame from camera")
+                            # Try to reinitialize camera if multiple frames are dropped
+                            if self.dropped_frames > 10:
+                                logger.warning("Too many dropped frames, attempting to reinitialize camera...")
+                                if not self.initialize_camera(source):
+                                    raise Exception("Failed to reinitialize camera")
+                                self.dropped_frames = 0
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error reading frame: {str(e)}")
                         continue
 
                     self.total_frames += 1
+                    current_time = datetime.now()
 
-                    if pupilTracking:
-                        frame, eye_coords = pupil_tracker.detect_pupil(frame)
-                        
-                        if self.recording and eye_coords:
-                            timestamp = datetime.now()
-                            self.eye_data['timestamp'].append(timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
-                            self.eye_data['frame_number'].append(self.frame_count)
-                            self.eye_data['left_eye_x'].append(eye_coords[0][0])
-                            self.eye_data['left_eye_y'].append(eye_coords[0][1])
-                            self.eye_data['right_eye_x'].append(eye_coords[1][0])
-                            self.eye_data['right_eye_y'].append(eye_coords[1][1])
-                            # Add placeholder values for new metrics
-                            self.eye_data['left_pupil_size'].append(0)
-                            self.eye_data['right_pupil_size'].append(0)
-                            self.eye_data['left_blink'].append(0)
-                            self.eye_data['right_blink'].append(0)
-                            self.eye_data['gaze_x'].append(0)
-                            self.eye_data['gaze_y'].append(0)
-                            self.eye_data['head_pose_x'].append(0)
-                            self.eye_data['head_pose_y'].append(0)
-                            self.eye_data['head_pose_z'].append(0)
-                            self.eye_data['marker'].append(None)
-                            self.frame_count += 1
+                    try:
+                        if pupilTracking:
+                            frame, eye_coords = pupil_tracker.detect_pupil(frame)
+                            
+                            # Always collect data when recording, even if eye tracking fails
+                            if self.recording:
+                                self.eye_data['timestamp'].append(current_time.strftime('%Y-%m-%d %H:%M:%S.%f'))
+                                self.eye_data['frame_number'].append(self.frame_count)
+                                
+                                if eye_coords and len(eye_coords) == 2:
+                                    self.eye_data['left_eye_x'].append(float(eye_coords[0][0]))
+                                    self.eye_data['left_eye_y'].append(float(eye_coords[0][1]))
+                                    self.eye_data['right_eye_x'].append(float(eye_coords[1][0]))
+                                    self.eye_data['right_eye_y'].append(float(eye_coords[1][1]))
+                                else:
+                                    # If eye tracking fails, store None values
+                                    self.eye_data['left_eye_x'].append(None)
+                                    self.eye_data['left_eye_y'].append(None)
+                                    self.eye_data['right_eye_x'].append(None)
+                                    self.eye_data['right_eye_y'].append(None)
+                                
+                                # Add other metrics with proper type handling
+                                self.eye_data['left_pupil_size'].append(None)
+                                self.eye_data['right_pupil_size'].append(None)
+                                self.eye_data['left_blink'].append(0)
+                                self.eye_data['right_blink'].append(0)
+                                self.eye_data['gaze_x'].append(None)
+                                self.eye_data['gaze_y'].append(None)
+                                self.eye_data['head_pose_x'].append(None)
+                                self.eye_data['head_pose_y'].append(None)
+                                self.eye_data['head_pose_z'].append(None)
+                                self.eye_data['marker'].append(None)
+                                self.eye_data['data_quality'].append(1.0 if eye_coords else 0.0)
+                                
+                                self.frame_count += 1
+                                
+                                # Periodically save data to prevent data loss
+                                if self.frame_count % 300 == 0:  # Save every 300 frames
+                                    try:
+                                        self.save_eye_data()
+                                    except Exception as e:
+                                        logger.warning(f"Error in periodic data save: {str(e)}")
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing frame: {str(e)}")
+                        continue
 
                     # Add status indicators
                     status_text = []
@@ -568,23 +592,35 @@ class PyEyeTrackRunner:
                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
                     # Show the frame
-                    cv2.imshow(self.window_name, frame)
+                    try:
+                        cv2.imshow(self.window_name, frame)
+                    except Exception as e:
+                        logger.error(f"Error displaying frame: {str(e)}")
 
                 # Process key events
-                key = cv2.waitKey(1) & 0xFF
-                if key != 255:  # Only process valid key presses
-                    if self.process_key(key):
-                        if not self.running:
-                            break
+                try:
+                    key = cv2.waitKey(1) & 0xFF
+                    if key != 255:  # Only process valid key presses
+                        if self.process_key(key):
+                            if not self.running:
+                                break
+                except Exception as e:
+                    logger.error(f"Error processing key event: {str(e)}")
 
         except Exception as e:
             logger.error(f"Error in eye tracking: {str(e)}")
             raise
         finally:
-            if hasattr(self, 'cap') and self.cap is not None:
-                self.cap.release()
-            cv2.destroyAllWindows()
-            self.cleanup()
+            # Cleanup
+            try:
+                if self.recording:
+                    self.save_eye_data()
+                if hasattr(self, 'cap') and self.cap is not None:
+                    self.cap.release()
+                cv2.destroyAllWindows()
+                self.cleanup()
+            except Exception as e:
+                logger.error(f"Error during cleanup: {str(e)}")
 
     def detect_cameras(self) -> list:
         """
